@@ -38,8 +38,13 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.tx
 # and then return exit 3 on every real invocation — which is precisely the
 # "reports success while doing less than it says" shape this family keeps
 # finding (§16), arriving by way of a default nobody re-measured.
+# `xauth` alongside `xvfb`, and it is not optional either: `xvfb-run` shells
+# out to xauth to create the display's authority file and dies with
+# "xauth command not found" without it — on EVERY invocation, `--help`
+# included. Found by running the image rather than by building it, which is
+# the whole reason CI does both (CLAUDE.md §11).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends xvfb \
+    && apt-get install -y --no-install-recommends xvfb xauth x11-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Every module playwright_scraper.py imports, transitively, plus diff_runs.py
@@ -50,11 +55,12 @@ RUN apt-get update \
 # `--help` — a broken container that nothing in the repo would have noticed.
 COPY captcha_solver.py env_config.py fingerprint_client.py output_writer.py \
      page_flow.py playwright_scraper.py product_parser.py proxy_pool.py \
-     diff_runs.py ./
+     diff_runs.py docker-entrypoint.sh ./
+RUN chmod +x /app/docker-entrypoint.sh
 
 ENV WOOLWORTHS_DOCKER=1
 
-# `xvfb-run -a` picks a free display number, so several containers on one
-# host do not collide.
-ENTRYPOINT ["xvfb-run", "-a", "python3", "playwright_scraper.py"]
+# The entrypoint starts Xvfb on a fixed display and execs the scraper; see
+# docker-entrypoint.sh for why it does that rather than using `xvfb-run`.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["--help"]

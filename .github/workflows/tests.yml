@@ -251,19 +251,29 @@ jobs:
         # is the invocation the broken image failed on.
         run: docker run --rm woolworths-scraper:ci
 
-      - name: A browser actually LAUNCHES in the image
+      - name: A browser actually LAUNCHES in the image, HEADFUL
         # `playwright install --with-deps chromium` is the step this job
         # exists to prove, and the half that fails silently is the apt half:
         # the layer can exit 0 with a browser that cannot start for want of a
         # shared library, and every run then dies at launch rather than at
         # build. Launching it is the only check that catches that.
+        #
+        # HEADFUL specifically, through the real entrypoint, because that is
+        # the only mode this site is served in — headless was refused 4 of 4
+        # URLs from a datacentre address. A headless launch check would pass
+        # on an image whose Xvfb is broken, which is exactly the image this
+        # job shipped twice before it was caught: once dying with "xauth
+        # command not found" and once hanging forever inside `xvfb-run -a`.
         run: |
-          docker run --rm --entrypoint python3 woolworths-scraper:ci -c "
+          docker run --rm --entrypoint sh woolworths-scraper:ci -c '
+          Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/dev/null 2>&1 &
+          for i in $(seq 1 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.1; done
+          DISPLAY=:99 python3 -c "
           from playwright.sync_api import sync_playwright
           with sync_playwright() as p:
-              b = p.chromium.launch()
-              print('chromium launched:', b.version)
-              b.close()"
+              b = p.chromium.launch(headless=False, args=[\"--no-sandbox\"])
+              print(\"chromium launched HEADFUL:\", b.version)
+              b.close()"'
 
       - name: The image carries no credentials and no test material
         # It COPYs an explicit list precisely so that it does not. Verify
@@ -272,7 +282,8 @@ jobs:
         run: |
           set -e
           missing=0
-          for f in .env smoke_test.py tests fixtures_generated.json captures; do
+          for f in .env smoke_test.py tests fixtures_generated.json captures \
+                   make_fixtures.py sample_output.json; do
             if docker run --rm --entrypoint sh woolworths-scraper:ci -c "test -e /app/$f"; then
               echo "::error::$f is inside the image and should not be"
               missing=1
