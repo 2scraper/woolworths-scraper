@@ -1,0 +1,113 @@
+name: Bug report
+description: The scraper ran but the result was wrong, empty, or it crashed.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before anything else: never paste an API key, a proxy password or a
+        full `ws://user:pass@...` endpoint into a public issue.** The scrapers
+        mask credentials in their own logs, but raw dumps do not. Replace them
+        with `***`.
+
+        A few things answer most reports faster than we can:
+
+        - **Everything exit 3?** Try `--headful` first — it is the default,
+          so this only applies if you passed `--headless`. Measured on this
+          site from one datacentre address: 4 of 4 URLs served headful, 0 of
+          4 headless, refused with Akamai's 403. If you are already headful,
+          the address is the next thing: Akamai refuses datacentre ranges, so
+          use `--proxy`/`--proxy-file` or `--cdp-endpoint`. An Australian
+          exit is NOT required — a US exit was served this site normally.
+          A captcha solve buys nothing here: the denial page is ~400 bytes of
+          plain HTML with no widget on it for any solver to answer.
+        - **Rows arrive but `price_source` is `api` on every one, never
+          `api+dom`?** Check the `unauthorised_redirect` field in the
+          `.meta.json` sidecar. If it is true, the site decided the browser
+          was automated and bounced it to `/unauthorisederror`: the rows are
+          still the API's and still correct, but the product grid never
+          rendered so there was nothing to confirm prices against.
+        - **`original_price` and `discount_pct` null on most rows?**
+          Expected. `WasPrice` equals `Price` on about four rows in five —
+          those products are simply not on special — and reporting a
+          was-price equal to the price would put a 0% discount on all of
+          them.
+        - **`health_star_rating`, `ingredients` or `allergy_statement` null
+          on some rows?** Expected and measured: 53.6%, 83.2% and 71.8%
+          populated on a 660-row corpus. Woolworths does not publish them for
+          every product.
+        - **Some rows look like ads?** They are. The site injects promoted
+          products into both listings and serves the SAME ones on every page.
+          `is_sponsored` marks them; filter on it.
+        - **Zero rows (exit 4)?** If the log says "the site reports 0 results
+          for this listing" then the listing really is empty. If it says the
+          parser produced none while the site stated a count, that is a bug
+          and this is the right issue.
+          See [TROUBLESHOOTING.md](../blob/main/TROUBLESHOOTING.md).
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Which engine
+      options:
+        - playwright_scraper.py
+        - puppeteer_scraper.py
+        - selenium_scraper.py
+        - fingerprint_client.py
+        - other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser_route
+    attributes:
+      label: How was the browser reached
+      options:
+        - A browser the script launched itself
+        - A remote browser over --cdp-endpoint
+        - Not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: exit_code
+    attributes:
+      label: Exit code
+      description: >-
+        `echo $?` straight after the run. These mean specific things — 3 is
+        blocked, 4 is "ran fine, found nothing", 6 is partial. The table is in
+        the README.
+      placeholder: "4"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: The exact command
+      description: With credentials replaced by `***`.
+      render: shell
+      placeholder: |
+        python3 playwright_scraper.py \
+          --url "https://www.woolworths.com.au/shop/browse/bakery" \
+          --pages 3 --out bakery
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: What it printed
+      description: >-
+        The last ~30 lines are usually enough. If the run wrote a
+        `*.meta.json` sidecar, please include it — `status`, `stop_reason`,
+        `pages_failed`, `dom_confirm` and `unauthorised_redirect` answer most
+        of what we would otherwise ask.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
