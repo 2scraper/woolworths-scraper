@@ -69,9 +69,20 @@ capture taken for this repo — `sitekey`, `data-sitekey`, `recaptcha`,
 `hcaptcha` and `turnstile` are each **0** on every served page and on both
 denial pages. Akamai's refusal is ~400 bytes of plain HTML with no widget on
 it, so there is nothing there for a solver at any price to answer. That is a
-statement about the page, not about the product: if Woolworths ever renders a
-widget, `captcha_solver.py` already implements reCAPTCHA v2/v3, enterprise
-reCAPTCHA and Cloudflare Turnstile.
+statement about the page, not about the product.
+
+What is in place if that ever changes, stated exactly, because "already
+implements" is easy to read as more than it is. `captcha_solver.py` builds
+`RecaptchaV2Task`, `RecaptchaV2TaskProxyless`, `RecaptchaV3TaskProxyless`,
+`RecaptchaV2EnterpriseTaskProxyless` and `TurnstileTaskProxyless`, and
+carries the `turnstile.render` interception script a Cloudflare **Challenge**
+page needs — that page publishes no sitekey, because Cloudflare passes
+`sitekey`, `action`, `cData` and `chlPageData` to `turnstile.render()` once
+and keeps nothing. **No engine installs that script yet**, so the Turnstile
+path is a builder without a caller: reCAPTCHA is wired end to end, Turnstile
+is not. Wiring it is ~15 lines per engine and wants a live challenge to
+verify against, which this site has never served. `foodpanda-scraper` in this
+family has it wired and measured.
 
 ---
 

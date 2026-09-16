@@ -11,6 +11,30 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-09-16
+
+### Fixed
+
+- **The README no longer says `captcha_solver.py` "already implements …
+  Cloudflare Turnstile".** It builds `TurnstileTaskProxyless` and carries the
+  `turnstile.render` interception script, but **no engine installs that
+  script**, so the Turnstile path is a builder with no caller. reCAPTCHA is
+  wired end to end; Turnstile is not. The old phrasing was true of the module
+  and false of the tool, and the difference only shows up on the one day it
+  matters. The README now names the five task types, says which are wired,
+  and says wiring the rest is ~15 lines per engine that wants a live
+  challenge to verify against — which this site has never served.
+
+### Added
+
+- **`test_a_built_captcha_task_type_is_reachable_or_documented`** — every
+  task type the solver builds must be reachable from an engine, or named in
+  the README as not yet wired. Asserted as a pairing rather than a keyword
+  search so it cannot go quiet by accident, and it also fails on the phrase
+  "already implements", which is what made the old sentence readable as more
+  than it was. Verified by control: claiming the script is installed turns
+  the suite red.
+
 ## [0.1.1] — 2026-09-16
 
 > **`--mode category` was broken in v0.1.0 on the Playwright engine**, which

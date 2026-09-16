@@ -1237,6 +1237,49 @@ def test_env_keys_are_not_mapped_onto_flags_with_defaults():
 
 
 @check
+def test_a_built_captcha_task_type_is_reachable_or_documented():
+    """§19 + §17: a solver a caller never reaches is dead code wearing a
+    capability's clothes, and the README is where that costs money.
+
+    `captcha_solver.py` builds five task types. reCAPTCHA is wired through
+    all three engines; Turnstile is NOT — the `turnstile.render` interception
+    that a Cloudflare Challenge page needs lives in the shared module and no
+    engine installs it. That is a fine state to be in on a site that has
+    never served a challenge, and it is NOT a fine thing to leave a reader to
+    discover. So: every task type the solver builds is either reachable from
+    an engine, or named in the README as not yet wired.
+
+    The pairing is asserted rather than a keyword searched, so it cannot go
+    quiet by accident (CLAUDE.md §21: a guard is only as good as the fixture
+    it runs against).
+    """
+    solver = (ROOT / "captcha_solver.py").read_text(encoding="utf-8")
+    engines = ""
+    for name in ENGINE_NAMES:
+        path = ROOT / f"{name}.py"
+        if path.exists():
+            engines += path.read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    # reCAPTCHA is the wired one and must stay wired.
+    assert "solve_recaptcha" in engines, \
+        "no engine calls solve_recaptcha: the reCAPTCHA path is unreachable"
+
+    # Turnstile: wired, or documented as not wired. Never silently neither.
+    wired = "TURNSTILE_INTERCEPT_JS" in engines
+    documented = "no engine installs that script yet" in readme.lower()
+    assert "TurnstileTaskProxyless" not in solver or wired or documented, (
+        "captcha_solver builds TurnstileTaskProxyless but no engine installs "
+        "TURNSTILE_INTERCEPT_JS, and the README does not say so. Either wire "
+        "it or say it is not wired -- a reader cannot tell from the outside.")
+
+    # And the README must not overstate the reCAPTCHA side either.
+    assert "already implements" not in readme.lower(), (
+        "'already implements' reads as 'this works end to end'. Name the task "
+        "types and say which are wired.")
+
+
+@check
 def test_banned_wording():
     """§12. The words are a product decision, and a test is what keeps them."""
     # Assembled rather than written out, so that THIS file does not contain
