@@ -48,6 +48,7 @@ SHAPES rather than for the old literals, so the next capture is caught too.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import pathlib
 import sys
@@ -131,6 +132,63 @@ def _trim_payload(payload: dict, keep: int = 6) -> dict:
     return out
 
 
+def verify_equivalence(captures: pathlib.Path, fixtures: dict) -> list:
+    """Every product kept in a fixture must parse to the SAME row as it does
+    in the untrimmed original.
+
+    CLAUDE.md §15 step 3 asks for exactly this before a trimmed fixture is
+    committed, and it is easy to skip because the trimmed file looks fine on
+    its own. What it catches is a `_scrub` that drops a field the parser
+    reads: the fixture would still parse, still produce rows, and quietly
+    disagree with reality on one column — so the suite would be asserting
+    against a fiction.
+
+    Returns a list of human-readable differences; empty means equivalent.
+    """
+    import product_parser as P
+
+    problems = []
+    pairs = [("api_search", "api_search.json"),
+             ("api_category", "api_category.json"),
+             ("api_ads_only", "api_ads_only.json"),
+             ("api_empty", "api_empty.json")]
+
+    for key, raw_name in pairs:
+        raw_path = captures / raw_name
+        if not raw_path.is_file():
+            problems.append(f"{key}: {raw_name} missing, cannot verify")
+            continue
+        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+
+        full = {r.sku: r for r in P.products_from_payload(raw, page=1)}
+        trimmed = {r.sku: r for r in P.products_from_payload(fixtures[key], page=1)}
+
+        if not trimmed and full:
+            problems.append(f"{key}: the trimmed fixture parses to nothing "
+                            f"while the original yields {len(full)}")
+            continue
+
+        for sku, row in trimmed.items():
+            original = full.get(sku)
+            if original is None:
+                problems.append(f"{key}: sku {sku} is in the fixture but not "
+                                f"in the original capture")
+                continue
+            for field in dataclasses.fields(row):
+                # `position` legitimately differs: the fixture keeps a subset
+                # of the groups, so a product's index within the page moves.
+                # Everything else must be byte-identical.
+                if field.name in ("scraped_at", "position"):
+                    continue
+                a = getattr(row, field.name)
+                b = getattr(original, field.name)
+                if a != b:
+                    problems.append(
+                        f"{key}: sku {sku}.{field.name} is {a!r} in the "
+                        f"fixture and {b!r} in the original")
+    return problems
+
+
 def build(captures: pathlib.Path) -> dict:
     """Assemble the fixture bundle from a directory of real captures."""
     def read_json(name):
@@ -194,6 +252,20 @@ def main() -> int:
         print(f"No such directory: {args.captures}", file=sys.stderr)
         return 2
     fixtures = build(args.captures)
+
+    # Verified BEFORE the file is written, so a fixture that disagrees with
+    # its own source never reaches the repo (§15 step 3).
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    problems = verify_equivalence(args.captures, fixtures)
+    if problems:
+        print("TRIMMED FIXTURES DO NOT MATCH THEIR ORIGINALS:", file=sys.stderr)
+        for problem in problems:
+            print("  -", problem, file=sys.stderr)
+        print("Nothing written.", file=sys.stderr)
+        return 1
+    print("equivalence: every kept product parses identically to the "
+          "untrimmed original")
+
     args.out.write_text(json.dumps(fixtures, indent=1, ensure_ascii=False),
                         encoding="utf-8")
     size = args.out.stat().st_size

@@ -103,7 +103,12 @@ logger = logging.getLogger("product_parser")
 # them would be the "is not a MediaMarkt site" error §5 warns about in
 # reverse.
 #
-# The apex answers: `https://woolworths.com.au/...` returned HTTP 200 and
+# Taken from the site's own markup rather than from a guess, which is what
+# §5 asks for. Woolworths publishes NO `<link rel="alternate" hreflang=…>`
+# set at all — 0 occurrences of `hreflang` on a served page — and exactly one
+# canonical, `https://www.woolworths.com.au/...`. One host, named by the site.
+#
+# The apex answers too: `https://woolworths.com.au/...` returned HTTP 200 and
 # redirected to `www.`, so both spellings are accepted and both normalise to
 # the canonical one before a URL is rebuilt (§5's "whether hosts answer on
 # www." check, run rather than assumed).

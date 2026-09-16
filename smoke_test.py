@@ -865,6 +865,232 @@ def test_undefined_names_in_every_module():
 
 
 # ===========================================================================
+# 10b. The concurrency machinery, with the browser stubbed out
+# ===========================================================================
+# A LIVE run cannot reach most of this: page 1 is fetched alone and decides
+# whether the rest is worth asking for, so a blocked or short page 1 means
+# the workers never start at all (§10). Stubbing the browser is the only way
+# to assert what the dispatcher actually does.
+class _FakeArgs:
+    """The attributes `_fetch_pages_concurrently` and its callees touch."""
+    def __init__(self, **kw):
+        self.url = "https://www.woolworths.com.au/shop/browse/bakery"
+        self.mode = "category"
+        self.pages = 9
+        self.delay = 0
+        self.retries = 1
+        self.retry_delay = 0
+        self.out = "unused"
+        self.concurrency = 3
+        self.cdp_endpoint = None
+        self.headless = False
+        self.dump_html = None
+        self.allow_empty = False
+        self.format = "json"
+        self.page_size = 36
+        self.proxy = self.proxy_file = None
+        self.twocaptcha_key = None
+        self.solve_captcha = "never"
+        self.__dict__.update(kw)
+
+
+class _FakeSession:
+    pool = None
+
+    def __init__(self, *a, **kw):
+        pass
+
+    def open(self):
+        return self
+
+    def close(self):
+        pass
+
+
+class _FakeSyncPlaywright:
+    """Stands in for `sync_playwright()` — a context manager yielding a stub."""
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _drive_concurrently(fetch_impl, specs, concurrency=3, pool=None):
+    """Run the real dispatcher against a stubbed browser and fetch."""
+    import threading
+    saved = (PW.sync_playwright, PW._BrowserSession, PW._fetch_one_page)
+    calls = []
+    lock = threading.Lock()
+
+    def counting_fetch(session, args, worker_pool, page_num, url):
+        with lock:
+            calls.append(page_num)
+        return fetch_impl(session, args, worker_pool, page_num, url)
+
+    PW.sync_playwright = lambda: _FakeSyncPlaywright()
+    PW._BrowserSession = _FakeSession
+    PW._fetch_one_page = counting_fetch
+    try:
+        results, unattempted, exhausted = PW._fetch_pages_concurrently(
+            _FakeArgs(), pool, specs, concurrency)
+    finally:
+        PW.sync_playwright, PW._BrowserSession, PW._fetch_one_page = saved
+    return calls, results, unattempted, exhausted
+
+
+def _outcome(page_num, products, **kw):
+    o = PW.PageOutcome(page_num=page_num,
+                       url="https://www.woolworths.com.au/shop/browse/bakery")
+    o.products = products
+    for k, v in kw.items():
+        setattr(o, k, v)
+    return o
+
+
+def _organic(n, start=0):
+    return [Product(sku=str(start + i), is_sponsored=False) for i in range(n)]
+
+
+@check
+def test_concurrency_fetches_every_queued_page_exactly_once():
+    if PW is None:
+        return
+    specs = [(n, "u") for n in range(2, 10)]
+    calls, results, unattempted, exhausted = _drive_concurrently(
+        lambda s, a, p, n, u: _outcome(n, _organic(3, n * 100)), specs)
+    assert sorted(calls) == list(range(2, 10)), f"pages fetched: {sorted(calls)}"
+    assert len(calls) == len(set(calls)), f"a page was fetched twice: {calls}"
+    assert not unattempted, unattempted
+    assert not exhausted
+
+
+@check
+def test_concurrency_outcomes_are_restorable_to_page_order():
+    """Workers finish out of order; the merge must not depend on that (§8)."""
+    if PW is None:
+        return
+    import random, time as _t
+
+    def jittery(session, args, pool, page_num, url):
+        _t.sleep(random.uniform(0, 0.02))
+        return _outcome(page_num, _organic(2, page_num * 100))
+
+    specs = [(n, "u") for n in range(2, 10)]
+    calls, results, _, _ = _drive_concurrently(jittery, specs)
+    ordered = [o.page_num for o in sorted(results, key=lambda o: o.page_num)]
+    assert ordered == list(range(2, 10)), ordered
+
+
+@check
+def test_concurrency_stops_dispatch_at_the_end_of_the_listing():
+    """And stops on ORGANIC rows, not on "the page was empty" — past its last
+    real page this API answers 200 with nothing but ads (§7)."""
+    if PW is None:
+        return
+    ads_only = [Product(sku="ad1", is_sponsored=True),
+                Product(sku="ad2", is_sponsored=True)]
+
+    def ads_from_page_4(session, args, pool, page_num, url):
+        if page_num >= 4:
+            return _outcome(page_num, list(ads_only))
+        return _outcome(page_num, _organic(3, page_num * 100))
+
+    specs = [(n, "u") for n in range(2, 40)]
+    calls, results, unattempted, exhausted = _drive_concurrently(
+        ads_from_page_4, specs, concurrency=2)
+    assert exhausted, "a page of nothing but ads did not stop dispatch"
+    assert len(calls) < 10, (
+        f"dispatch kept going for {len(calls)} pages after the listing ended; "
+        "at most (concurrency - 1) extra fetches should be in flight")
+    assert unattempted, "pages left in the queue were not reported"
+
+
+@check
+def test_concurrency_reports_unattempted_pages_rather_than_failing_them():
+    """They were never tried; claiming otherwise overstates the damage (§8)."""
+    if PW is None:
+        return
+
+    def empty_at_3(session, args, pool, page_num, url):
+        if page_num == 3:
+            return _outcome(page_num, [])
+        return _outcome(page_num, _organic(3, page_num * 100))
+
+    specs = [(n, "u") for n in range(2, 30)]
+    calls, results, unattempted, exhausted = _drive_concurrently(
+        empty_at_3, specs, concurrency=2)
+    assert exhausted
+    assert unattempted, "nothing reported as unattempted"
+    assert all(not o.load_failed and o.blocked_by is None for o in results), (
+        "an unattempted page was recorded as a failed one")
+    assert set(unattempted).isdisjoint(set(calls)), (
+        "a page is both fetched and unattempted")
+
+
+@check
+def test_a_worker_that_raises_neither_hangs_the_run_nor_loses_its_siblings():
+    if PW is None:
+        return
+
+    def explode_on_5(session, args, pool, page_num, url):
+        if page_num == 5:
+            raise RuntimeError("worker died on purpose")
+        return _outcome(page_num, _organic(3, page_num * 100))
+
+    specs = [(n, "u") for n in range(2, 10)]
+    calls, results, unattempted, exhausted = _drive_concurrently(
+        explode_on_5, specs, concurrency=3)
+    # It returned at all — that is the "does not hang" half.
+    got = {o.page_num for o in results}
+    assert got, "a dying worker lost every result"
+    assert 5 not in got, "the page that raised was recorded as an outcome"
+    # Its siblings' pages are either done or reported unattempted, never lost.
+    accounted = got | set(unattempted) | {5}
+    assert accounted >= set(range(2, 10)), (
+        f"pages went missing entirely: {set(range(2, 10)) - accounted}")
+
+
+@check
+def test_each_worker_starts_on_a_different_exit():
+    """Workers all leaving from one address is just a faster way to burn it (§7)."""
+    if PW is None:
+        return
+    pool = proxy_pool.ProxyPool(["http://a:1", "http://b:2", "http://c:3"],
+                                rotate="per-run")
+    firsts = {PW._worker_pool(pool, i).current for i in range(3)}
+    assert len(firsts) == 3, f"workers started on {firsts}"
+    assert PW._worker_pool(None, 0) is None
+
+
+@check
+def test_paid_api_kwargs_are_ones_the_driver_accepts():
+    """An unknown key in `new_context(**kwargs)` is a TypeError at launch, on
+    the PAID path, at runtime (§10)."""
+    if PW is None:
+        return
+    import inspect as _inspect
+    from playwright.sync_api import BrowserContext  # noqa: F401
+    import fingerprint_client
+
+    fake_fp = {"id": 1, "country": "AU", "userAgent": {"value": "UA/1.0"},
+               "screen": {"width": 1440, "height": 900},
+               "timezone": "Australia/Sydney", "locale": "en-AU"}
+    try:
+        kwargs = fingerprint_client.playwright_context_kwargs(fake_fp)
+    except Exception as e:  # noqa: BLE001 — a shape we do not model is not a failure here
+        skip("fingerprint kwargs", f"could not build from a stub fingerprint ({e})")
+        return
+    from playwright.sync_api import Browser
+    sig = _inspect.signature(Browser.new_context)
+    accepted = set(sig.parameters)
+    unknown = [k for k in kwargs if k not in accepted]
+    assert not unknown, (
+        f"fingerprint_client hands new_context {unknown}, which Playwright "
+        "does not accept — a TypeError at launch on the paid path")
+
+
+# ===========================================================================
 # 11. Credentials, config, wording
 # ===========================================================================
 @check
