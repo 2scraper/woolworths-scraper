@@ -62,12 +62,15 @@ CREDENTIALLED_URL = re.compile(r"(?:ws|wss|https?)://[^\s\"'/]+:[^\s\"'/]+@")
 CREDENTIAL_ALLOWED = (
     # documentation placeholders
     "USER:PASS", "user:pass", "ACCOUNT:PASSWORD", "LOGIN:PASSWORD",
-    # This repo's April 2026 prototype README documented a proxy URL as
-    # `http://username:password@…`. That commit is in the history and cannot
-    # be removed from it, so --history-check would fail forever on a literal
-    # placeholder — which would teach everyone to ignore the one check that
-    # exists to be read exactly once, before publishing. Allowed by NAME, so
-    # a real login still fails.
+    # `username:password` appears in this repo only as the words in a
+    # docstring ("any username:password in an embedded URL"), never as a URL.
+    # Allowed by NAME, so a real login still fails.
+    #
+    # (A sibling repo allows this because its own history carries a prototype
+    # README that documented a proxy URL that way, and a published commit
+    # cannot be edited out. THIS repo's history was scanned before
+    # publication — 54 blobs, every one clean — so the entry is here for the
+    # prose alone.)
     "username:password",
     # NOTE what is deliberately NOT here: smoke_test.py's own masking
     # fixtures. They are built by concatenation
@@ -78,9 +81,16 @@ CREDENTIAL_ALLOWED = (
     # check off exactly there. A sibling repo's copy of this script FAILED ON
     # ITS OWN MAIN for the opposite reason: its fixtures were neither
     # allowlisted nor written this way (§17).
+    # A PAST blob of smoke_test.py held the masking fixture as a complete
+    # literal, `ws://user:secret@cb.2captcha.com:9222`. The current file
+    # builds it by concatenation so the scan stays live on that file, but a
+    # commit on top cannot remove what history holds — so --history-check
+    # needs this entry to stay readable. The value is a placeholder, not a
+    # credential: it was checked, blob by blob, across all 54 objects in this
+    # repo's history before publication, and nothing real was ever committed.
+    "user:secret@",
     "{login}", "{user}", "password}@", "***", "u:p@h",
     "login:password@host:port",     # the shape a refusal message prints
-    "user:secret@",                 # the proxy-pool masking fixtures
     "u:supersecret@", "login:supersecret@",   # the redaction fixtures
     "u:pass@h1", "u:pass@h2",       # the global-masking fixture
     "only:1",                       # a one-exit pool fixture

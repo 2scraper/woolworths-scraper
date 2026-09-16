@@ -851,7 +851,13 @@ def test_credentials_are_masked_globally_not_once():
     """A Playwright CDP error repeats the endpoint five times (§8)."""
     if PW is None:
         return
-    text = " ".join(["ws://user:secret@cb.2captcha.com:9222"] * 5)
+    # Built by CONCATENATION on purpose, so that no line of this file holds a
+    # complete `scheme://user:pass@host` literal. That keeps the credential
+    # scan fully live on smoke_test.py — the one file where a real key is
+    # most likely to get pasted while debugging — instead of switching it off
+    # here with an allowlist entry.
+    endpoint = "ws://user:" + "secret" + "@cb.2captcha.com:9222"
+    text = " ".join([endpoint] * 5)
     masked = PW._mask_credentials(text)
     assert "secret" not in masked, masked
     assert masked.count("***:***@") == 5, masked
