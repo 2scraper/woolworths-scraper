@@ -27,6 +27,15 @@ What goes in, and why each one earns its place:
                       entity-escaped. Both, because a marker that survives
                       only one of them silently misses an entire engine
                       (§20).
+    served_cdp_page   the same kind of page fetched over --cdp-endpoint,
+                      and the reason it is a SEPARATE fixture: the Scraping
+                      Browser's auto-solve extension injects its own hunters
+                      into every page it loads, so this one carries
+                      `chrome-extension://` 16 times, `turnstile` 3 and
+                      `recaptcha` 2 while the locally-fetched page carries 0
+                      of each. A captcha guard tested only against the local
+                      page never meets an injection and passes without
+                      proving anything (§21).
     served_page       a page the site really served, WHOLE. Not truncated,
                       and that is deliberate: the two markers this repo got
                       wrong are `akamai` (first occurrence at byte 347,429)
@@ -222,6 +231,7 @@ def build(captures: pathlib.Path) -> dict:
         "denial_dom": read_text("denial_dom.html"),
         "denial_raw": read_text("denial_raw.html"),
         "served_page": read_text("served.html"),
+        "served_cdp_page": read_text("served_cdp.html"),
     }
     # The category tree is 2,700 nodes; keep only the top level plus one
     # branch, which is all `category_id_for_slug` needs to be tested on.
