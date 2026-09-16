@@ -161,8 +161,23 @@ def test_flatten_products_handles_bundles_and_bare_lists():
 
 @check
 def test_total_count_reads_both_spellings():
-    assert P.total_count(FIXTURES["api_search"]) == 2205
-    assert P.total_count(FIXTURES["api_category"]) == 575
+    """Search calls it `SearchResultsCount`, a category `TotalRecordCount`.
+
+    Asserted against the fixture's OWN value rather than against a literal.
+    The literals were 2205 and 575, and the category one was 576 the next
+    time the captures were regenerated — Woolworths had added a product.
+    A number that describes a living catalogue does not belong in an
+    assertion (§13); what belongs there is that both spellings are read and
+    that a zero is a zero rather than a None.
+    """
+    assert (P.total_count(FIXTURES["api_search"])
+            == FIXTURES["api_search"]["SearchResultsCount"])
+    assert (P.total_count(FIXTURES["api_category"])
+            == FIXTURES["api_category"]["TotalRecordCount"])
+    assert P.total_count(FIXTURES["api_search"]) > 100, "implausibly small"
+    assert P.total_count(FIXTURES["api_category"]) > 100, "implausibly small"
+    # Zero is a real answer and must not come back as None: it is the only
+    # thing that tells an empty listing from a broken parser.
     assert P.total_count(FIXTURES["api_empty"]) == 0
     assert P.total_count(None) is None and P.total_count([]) is None
 
@@ -216,7 +231,18 @@ def test_discount_is_never_zero_or_negative():
 # ===========================================================================
 @check
 def test_pinned_values_from_a_real_search_payload():
-    """A column can be 100% populated and entirely wrong."""
+    """A column can be 100% populated and entirely wrong.
+
+    These ARE pinned to literals, unlike `total_count` above, and the
+    difference is worth stating so nobody "fixes" it the same way. Comparing
+    a parsed price against the fixture's own `Price` field would be
+    circular — that is the field the parser read. A literal is what catches
+    it reading `InstorePrice`, or `Name` instead of `DisplayName`.
+
+    So these go stale only when someone regenerates the captures, and that is
+    the intended moment to look again: the fixture and the expectation move
+    together, in one commit, under human eyes.
+    """
     rows = {r.sku: r for r in P.products_from_payload(FIXTURES["api_search"],
                                                       page=1)}
     assert rows, "the search fixture parsed to nothing"
@@ -1368,14 +1394,28 @@ def test_no_captcha_is_detected_on_a_good_page():
         "a served Woolworths page reads as carrying a reCAPTCHA")
     assert captcha_solver.detect_turnstile(served, "https://x") is None, (
         "a served Woolworths page reads as carrying a Turnstile")
-    extension = served + (
-        '<script src="chrome-extension://kjmkgkdkpedkejedfhmfcenooemhbpbo/'
-        'content/captcha/turnstile/hunter.js" '
-        'data-ts-input="cf-turnstile-response"></script>')
-    assert captcha_solver.detect_turnstile(extension, "https://x") is None, (
-        "the auto-solve extension's own hunter reads as a Turnstile — this "
-        "is measured to appear on every page fetched over --cdp-endpoint, so "
-        "it would buy a solve on a page that was served perfectly well")
+    # And on a REAL page fetched over --cdp-endpoint, not a synthetic one.
+    # §21: the guard that missed this in a sibling repo passed for the wrong
+    # reason — it ran only against a page fetched with plain curl, which
+    # carries no extension injection at all. The fixture that matters is the
+    # one fetched the way a real run fetches.
+    cdp = FIXTURES["served_cdp_page"]
+    injected = cdp.count("chrome-extension://")
+    assert injected >= 5, (
+        f"the CDP fixture carries only {injected} extension reference(s) — "
+        "it is no longer a page fetched through the Scraping Browser, so "
+        "this check has stopped proving anything. Recapture it.")
+    assert captcha_solver.detect_recaptcha_v3(cdp, "https://x") is None, (
+        "a page served over --cdp-endpoint reads as carrying a reCAPTCHA; "
+        "the markers on it are the auto-solve extension's, not the site's")
+    assert captcha_solver.detect_turnstile(cdp, "https://x") is None, (
+        "the auto-solve extension's own hunter reads as a Turnstile — it "
+        "appears on every page fetched over --cdp-endpoint, so this would "
+        "buy a solve on a page that was served perfectly well")
+    assert P.detect_page_state(cdp, status=200,
+                               url="https://www.woolworths.com.au/shop/"
+                                   "search/products?searchTerm=milk") == "content", (
+        "a page served over --cdp-endpoint does not classify as content")
 
 
 @check
