@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "woolworths-scraper"
-version = "0.1.0"
+version = "0.1.1"
 description = "Woolworths Online product scraper: search and category listings from woolworths.com.au, with prices, unit prices, specials, health star ratings and allergen data."
 readme = "README.md"
 license = "MIT"
