@@ -1,0 +1,216 @@
+name: canary
+
+# One real run a day against woolworths.com.au, and the only workflow in this
+# repo that touches the site. Everything else is offline (see tests.yml).
+#
+# WHY THIS CANARY SKIPS BY DEFAULT
+# --------------------------------
+# Akamai refuses this site to a datacentre address, and a GitHub runner is
+# one. Measured 2026-09-16 from a datacentre exit: four URLs fetched HEADLESS
+# were refused 4 of 4 with Akamai's 403, and the same four fetched HEADFUL
+# were served 4 of 4 — but a runner has no display, so the live steps below
+# run the browser under Xvfb, and even then the ADDRESS is still a datacentre
+# one.
+#
+# So without a residential exit this canary would be red every single day,
+# and a check that is always red teaches everyone to ignore checks (§11). It
+# therefore SKIPS, loudly and green, when no proxy secret is set:
+#
+#     gh secret set WOOLWORTHS_PROXY --repo 2scraper/woolworths-scraper
+#
+# The secret goes through the ENVIRONMENT rather than a commented-out
+# `--proxy` line, because `env_config.py` already reads exactly that variable
+# and an unset secret arrives as an empty string which the loader treats as
+# unset. One line is therefore correct with and without it, and the
+# credential never reaches a command line (§3).
+#
+# `secrets` is not available in a job-level `if`, so presence is tested
+# through job `env` and read in each step's `if`.
+
+on:
+  schedule:
+    - cron: "17 19 * * *"       # 05:17 Australian eastern time, off-peak
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      HAVE_PROXY: ${{ secrets.WOOLWORTHS_PROXY != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Explain the skip and stop
+        if: env.HAVE_PROXY != 'true'
+        run: |
+          echo "::notice::No WOOLWORTHS_PROXY secret is set, so the live run is skipped rather than failed."
+          {
+            echo "### Canary skipped"
+            echo
+            echo "Akamai refuses woolworths.com.au to datacentre addresses, and a GitHub"
+            echo "runner is one. Measured 2026-09-16: 4 of 4 URLs refused headless from a"
+            echo "datacentre exit, 4 of 4 served headful from the same address."
+            echo
+            echo "A canary that cannot pass must skip rather than fail: a check that is"
+            echo "always red teaches everyone to ignore checks."
+            echo
+            echo 'Set a residential exit to turn it on:'
+            echo '```'
+            echo 'gh secret set WOOLWORTHS_PROXY --repo 2scraper/woolworths-scraper'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the Playwright engine
+        if: env.HAVE_PROXY == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+
+      - name: Install Xvfb
+        if: env.HAVE_PROXY == 'true'
+        # Headful, not headless, and that is the measurement above rather
+        # than a preference. A runner has no display, so the browser gets a
+        # virtual one.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+
+      # A FILTERED CATEGORY and >= 3 pages. One page never exercises
+      # pagination, which is exactly how a silent single-page bug survived in
+      # a sibling repo — and on this site page 2 onward is where the
+      # ads-repeat-forever behaviour lives (§7).
+      - name: Run the canary
+        if: env.HAVE_PROXY == 'true'
+        id: run
+        env:
+          WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}
+        run: |
+          # set +e: GitHub runs `run:` under `bash -e`, so a non-zero exit
+          # would abort the step BEFORE the exit code could be captured, and
+          # continue-on-error does not change that.
+          set +e
+          xvfb-run -a python3 playwright_scraper.py \
+            --url "https://www.woolworths.com.au/shop/browse/bakery" \
+            --pages 3 \
+            --format json \
+            --out canary 2>&1 | tee canary.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "The run exited $code."
+
+      - name: Interpret the exit code
+        if: env.HAVE_PROXY == 'true'
+        run: |
+          case "${{ steps.run.outputs.exit_code }}" in
+            0) echo "::notice::Run completed." ;;
+            3) echo "::error::Exit 3 — blocked. Akamai refused the proxy's exit. Check the exit is residential and, if it is, whether the site has changed what it refuses." ;;
+            4) echo "::error::Exit 4 — zero products from a category that is not empty. This is the parser, not the site." ;;
+            6) echo "::error::Exit 6 — partial. Some page failed; see the failed page numbers in the sidecar." ;;
+            *) echo "::error::Unexpected exit ${{ steps.run.outputs.exit_code }}." ;;
+          esac
+          test "${{ steps.run.outputs.exit_code }}" = "0"
+
+      # The thresholds are the numbers a real run produced on 2026-09-16, set
+      # low enough to absorb an ordinary day's variation and high enough that
+      # a broken read cannot pass. Bakery held 575 products over 16 pages;
+      # three pages is ~110 rows, of which a handful are ads.
+      - name: Assert what the run actually produced
+        if: env.HAVE_PROXY == 'true'
+        run: |
+          python3 - <<'PY'
+          import json, sys
+
+          meta = json.load(open("canary.meta.json"))
+          rows = json.load(open("canary.json"))
+          problems = []
+
+          def want(cond, msg):
+              if not cond:
+                  problems.append(msg)
+
+          want(meta["status"] == "complete",
+               f"status is {meta['status']!r}, not 'complete'")
+          want(meta["pages_completed"] >= 3,
+               f"only {meta['pages_completed']} page(s) completed; "
+               "pagination is the thing this canary exists to exercise")
+          want(not meta.get("pages_failed"),
+               f"pages failed: {meta.get('pages_failed')}")
+          want(len(rows) >= 90,
+               f"{len(rows)} rows; three pages of this category produced ~110")
+
+          priced = [r for r in rows if r.get("price") is not None]
+          want(len(priced) / max(len(rows), 1) >= 0.90,
+               f"only {len(priced)}/{len(rows)} rows carry a price")
+
+          # Every row must have the id everything else joins on.
+          want(all(r.get("sku") for r in rows), "some row has no sku")
+
+          # page+position unique as a PAIR: position restarts each page, and
+          # the column is worthless without page beside it.
+          pairs = [(r["page"], r["position"]) for r in rows]
+          want(len(set(pairs)) == len(pairs), "page+position is not unique")
+
+          # The section 4 canary: a was-price that is not above the price
+          # means WasPrice was read straight, which puts a 0% discount on
+          # four products in five.
+          bad = [r["sku"] for r in rows
+                 if r.get("original_price") is not None
+                 and r.get("price") is not None
+                 and r["original_price"] <= r["price"]]
+          want(not bad, f"rows with original_price <= price: {bad[:5]}")
+
+          # The ads must be labelled. If this drops to zero the column has
+          # stopped being filled, and the dedupe and the stop condition both
+          # depend on it.
+          want(any(r.get("is_sponsored") for r in rows)
+               or meta.get("sponsored_rows") == 0,
+               "no row is marked sponsored and the sidecar does not say zero")
+
+          # The DOM cross-check ran and agreed. If the grid stops rendering —
+          # the /unauthorisederror bounce — this is what notices, because the
+          # rows themselves stay correct.
+          dom = meta.get("dom_confirm")
+          want(dom and dom.get("checked", 0) > 0,
+               "no row was confirmed against a rendered tile; the grid may "
+               "not have rendered (see unauthorised_redirect in the sidecar)")
+          if dom and dom.get("checked"):
+              share = dom["confirmed"] / dom["checked"]
+              want(share >= 0.90,
+                   f"only {share:.0%} of DOM-checked rows agreed on price")
+
+          want(not meta.get("unauthorised_redirect"),
+               "the app bounced the browser to /unauthorisederror — the rows "
+               "are still the API's and correct, but the grid did not render")
+
+          print(f"rows={len(rows)} priced={len(priced)} "
+                f"pages={meta['pages_completed']} dom={dom}")
+          if problems:
+              print("\nFAILED:")
+              for p in problems:
+                  print(" -", p)
+              sys.exit(1)
+          print("All canary assertions passed.")
+          PY
+
+      - name: Upload artefacts
+        if: always() && env.HAVE_PROXY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-${{ github.run_id }}
+          path: |
+            canary.json
+            canary.meta.json
+            canary.log
+            *_debug.html
+            *_debug.png
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,17 @@
+# The recommended engine.
+#
+#   pip install -r requirements.txt -r requirements-playwright.txt
+#   playwright install chromium
+#
+# `chromium` is enough here, and that is a measurement rather than a shrug: a
+# sibling repo in this family has to install real Chrome because its site
+# refuses the bundled build, and Woolworths does not. Playwright's own
+# Chromium was served HTTP 200 and the full catalogue on every HEADFUL fetch
+# measured on 2026-09-16.
+#
+# What this site DOES refuse is headless — the same bundled Chromium, same
+# address, same minute, was refused 4 of 4 URLs headless and served 4 of 4
+# headful. So run it headful (the default) and, on a machine with no display,
+# under `xvfb-run -a` rather than with `--headless`.
+
+playwright>=1.40.0

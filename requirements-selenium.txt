@@ -1,0 +1,20 @@
+# Selenium engine. A parity engine — prefer the Playwright one.
+#
+#   pip install -r requirements.txt -r requirements-selenium.txt
+#
+# chromedriver drives the Google Chrome or Chromium you already have, and
+# Selenium 4.6+ resolves the driver itself through Selenium Manager, so there
+# is nothing else to install.
+#
+# Two limits worth knowing before you choose this engine, both of them
+# chromedriver's rather than this repo's:
+#
+#   * it CANNOT authenticate a proxy — `--proxy-server` takes an address with
+#     nowhere to put a password, so credentials are stripped and you are
+#     warned;
+#   * it CANNOT use an authenticated CDP endpoint — `debuggerAddress` takes a
+#     bare host:port, so the Scraping Browser API is out of reach from here.
+#
+# Use the Playwright or pyppeteer engine for either.
+
+selenium>=4.15.0

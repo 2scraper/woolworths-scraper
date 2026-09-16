@@ -1,0 +1,17 @@
+# pyppeteer engine. A parity engine, and the least recommended of the three:
+# pyppeteer is effectively unmaintained and its own README points at
+# Playwright.
+#
+#   pip install -r requirements.txt -r requirements-puppeteer.txt
+#
+# pyppeteer downloads its own Chromium on first run, which this site accepts
+# — measured headful on 2026-09-16. You can point it at an installed browser
+# instead if you prefer:
+#
+#   python3 puppeteer_scraper.py --chromium-path /usr/bin/chromium ...
+#
+# It can authenticate a proxy (through `page.authenticate`, never on the
+# command line) and can use an authenticated CDP endpoint, both of which the
+# Selenium engine cannot.
+
+pyppeteer>=1.0.2

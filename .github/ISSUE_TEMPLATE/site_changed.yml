@@ -1,0 +1,80 @@
+name: Site changed
+description: Woolworths changed something and the parser no longer matches.
+title: "[site] "
+labels: ["site-change"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when the scraper used to work on a URL and now returns fewer
+        rows, empty columns, or nothing at all — the usual cause is that
+        something on woolworths.com.au moved.
+
+        **What this scraper depends on**, roughly in order of how likely each
+        is to break:
+
+        - **The site's own API**, which is where every row comes from:
+          `POST /apis/ui/Search/products`, `POST /apis/ui/browse/category`,
+          and `/apis/ui/PiesCategoriesWithSpecials` for turning a category
+          slug into the opaque node id the browse endpoint needs. If the
+          request body gained a required field, page 1 comes back with zero
+          products and `Success: true`, which reads exactly like an empty
+          category.
+        - **The group wrapper.** `Products` (search) and `Bundles` (category)
+          are lists of `{"Products": [...]}` objects, not lists of products.
+          If that flattens, every column comes back null.
+        - **The field names** the parser reads: `Stockcode`, `DisplayName`,
+          `Price`, `WasPrice`, `CupString`, `IsSponsoredAd`, and the
+          `AdditionalAttributes` keys (`healthstarrating`, `ingredients`,
+          `allergystatement`, `sapdepartmentname`).
+        - **The shadow-DOM tiles**, used only to confirm prices:
+          `<wc-product-tile>` with `a[href*="/shop/productdetails/"]` and
+          `[class*="product-tile-price"]` inside its open shadow root. If
+          this breaks you lose `price_source: api+dom` and nothing else —
+          the rows stay correct.
+        - **Akamai's refusal page**, which is how a block is recognised at
+          all: `Access Denied`, `You don't have permission`, `edgesuite`.
+
+        Please say which of these it looks like if you can — but a URL and an
+        exit code is plenty to start.
+
+  - type: input
+    id: url
+    attributes:
+      label: The URL
+      placeholder: "https://www.woolworths.com.au/shop/browse/bakery (mode: category, headful bundled Chromium, exit: AU residential)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What happens
+      options:
+        - Zero rows (exit 4) on a listing that has products
+        - Fewer rows than the site shows
+        - Rows arrive but a column is empty that used to be filled
+        - Blocked (exit 3) where it used to be served
+        - Partial (exit 6) — the API refused a page mid-run
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: dump
+    attributes:
+      label: What the scraper saw
+      description: |
+        Re-run with `--dump-html out.html`. That writes TWO files per page:
+        the document, and **`out.html.api.json`** — the payload the rows
+        actually come from. The second one is the useful one here, because
+        this site puts no product data in the document at all.
+
+        Please paste the first ~40 lines of the `.api.json`, and the
+        `*.meta.json` sidecar if the run wrote one.
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
