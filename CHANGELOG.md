@@ -11,6 +11,35 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-09-16
+
+> **`--mode category` was broken in v0.1.0 on the Playwright engine**, which
+> is the engine the README recommends. It died on its first API call with
+> `AttributeError: 'Page' object has no attribute 'page'`. Search mode was
+> unaffected. Upgrade if you used v0.1.0 for anything under
+> `/shop/browse/`.
+
+### Fixed
+
+- `_resolve_target` passed a page where `_fetch_api` expects a session, on
+  the Playwright engine only. The retry work in v0.1.0 changed that
+  signature and landed in two engines out of three; the post-change
+  verification used a search URL, which never reaches the line, so the bug
+  shipped.
+
+### Added
+
+- A check comparing the ARGUMENT SPELLING of same-named helpers across the
+  three engines, so a signature change that lands in some files and not
+  others fails offline. Nothing existing could catch this one: arity was
+  identical, so the call bound fine, and the shared-module binding check
+  does not cover a module's own helpers.
+- It immediately found a second divergence — `_read_tiles` took a page on
+  Playwright and a session on its twins. All three now take the session.
+
+Verified after the fix: every engine against BOTH modes — playwright 76/81,
+selenium 80/81, puppeteer 76/81 rows, all `complete`, all exit 0.
+
 ## [0.1.0] — 2026-09-16
 
 Rebuilt on the 2scraper family architecture. The previous contents of this
@@ -129,5 +158,6 @@ do. `captcha_solver.py` implements reCAPTCHA v2/v3, enterprise reCAPTCHA
 (`TurnstileTaskProxyless`); if Woolworths ever renders one,
 `page_flow.STATE_POLICY` is the single line to change.
 
-[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/woolworths-scraper/releases/tag/v0.1.0
