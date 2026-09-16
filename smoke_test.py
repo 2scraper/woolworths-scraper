@@ -106,6 +106,27 @@ ENGINES = [e for e in (PW, SE, PP) if e is not None]
 ENGINE_NAMES = ("playwright_scraper", "selenium_scraper", "puppeteer_scraper")
 
 
+def _shipped_files(suffixes):
+    """Every file this repo SHIPS, with the suffixes given.
+
+    Excludes `.claude/` and `.git/` RELATIVE TO THE REPO ROOT rather than
+    anywhere in the absolute path — this repo is developed inside a worktree
+    under `.claude/worktrees/`, so an absolute-path test excluded everything
+    and quietly turned two checks into no-ops (CI caught it; the local run
+    could not).
+    """
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or path.suffix not in suffixes:
+            continue
+        rel = path.relative_to(ROOT)
+        if rel.parts and rel.parts[0] in {".git", ".claude", "captures",
+                                          "__pycache__", ".pytest_cache"}:
+            continue
+        if path.name.startswith("_"):
+            continue
+        yield path
+
+
 # ===========================================================================
 # 1. The payload: shapes that would silently lose everything
 # ===========================================================================
@@ -915,12 +936,25 @@ def test_env_keys_are_not_mapped_onto_flags_with_defaults():
 @check
 def test_banned_wording():
     """§12. The words are a product decision, and a test is what keeps them."""
-    banned = ("cloud browser", "antidetect browser", "Antidetect Browser",
-              "gate.2prx.com", "--antidetect", "ANTIDETECT_LOCAL_API")
-    shipped = [p for p in ROOT.rglob("*")
-               if p.is_file()
-               and p.suffix in {".py", ".md", ".yml", ".yaml", ".txt", ".toml"}
-               and ".claude" not in p.parts and not p.name.startswith("_")]
+    # Assembled rather than written out, so that THIS file does not contain
+    # the literals it forbids and the scan can stay live on it — the same
+    # reasoning as the masking fixture above. An exemption for smoke_test.py
+    # would switch the check off on one of the files most likely to acquire
+    # a stray phrase by copy-paste.
+    ad = "anti" + "detect"
+    banned = (" ".join(["cloud", "browser"]),
+              f"{ad} browser",
+              f"gate.2prx" + ".com",
+              f"--{ad}",
+              f"{ad.upper()}_LOCAL_API")
+    shipped = list(_shipped_files({".py", ".md", ".yml", ".yaml", ".txt", ".toml"}))
+    # The scan must actually have scanned something. An earlier version
+    # excluded any path containing `.claude`, and this repo is developed in a
+    # worktree under `.claude/worktrees/` — so the exclusion matched EVERY
+    # file and the check silently passed on nothing, locally, while failing
+    # in CI where the path differs. A check that can quietly scan zero files
+    # is not a check.
+    assert len(shipped) > 20, f"only {len(shipped)} file(s) scanned"
     problems = []
     for path in shipped:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -937,7 +971,10 @@ def test_removed_flags_stay_removed_on_the_engines():
     picks a fingerprint locale (§10)."""
     for name in ENGINE_NAMES:
         flags = _flags_of(name)
-        for gone in ("--country", "--antidetect", "--page-size", "--search-term"):
+        # "--anti" + "detect" for the same reason as the banned list above:
+        # writing the literal here would make this file trip that check.
+        for gone in ("--country", "--anti" + "detect", "--page-size",
+                     "--search-term"):
             assert gone not in flags, f"{name} reintroduced {gone}"
 
 
@@ -1091,14 +1128,26 @@ def test_no_file_claims_a_captcha_cannot_be_solved():
         r"(captcha|recaptcha|turnstile)[^.\n]{0,80}"
         r"(cannot be solved|can't be solved|is unsolvable|impossible to solve)",
         re.IGNORECASE)
+    # A sentence STATING THE RULE is not a violation of it. CONTRIBUTING.md
+    # says "Never write that a captcha cannot be solved", which is the
+    # instruction, and matching it would make the rule impossible to write
+    # down.
+    stating_the_rule = re.compile(
+        r"(never|do not|don't|not to|nor)\s+(write|say|claim|state)\b[^.\n]{0,40}$",
+        re.IGNORECASE)
     problems = []
-    for path in ROOT.rglob("*"):
-        if (not path.is_file() or path.suffix not in {".py", ".md"}
-                or ".claude" in path.parts or path.name.startswith("_")
-                or path.name == "smoke_test.py"):
-            continue
-        for m in bad.finditer(path.read_text(encoding="utf-8", errors="replace")):
+    scanned = 0
+    for path in _shipped_files({".py", ".md"}):
+        if path.name == "smoke_test.py":
+            continue   # this file necessarily contains the phrase it forbids
+        scanned += 1
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for m in bad.finditer(text):
+            before = text[max(0, m.start() - 60):m.start()]
+            if stating_the_rule.search(before):
+                continue
             problems.append(f"{path.relative_to(ROOT)}: {m.group(0)[:90]!r}")
+    assert scanned > 10, f"only {scanned} file(s) scanned"
     assert not problems, (
         "a claim that a captcha cannot be solved — say 'this repo does not "
         "implement X' instead (§19):\n  " + "\n  ".join(problems))
