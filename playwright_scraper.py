@@ -90,7 +90,8 @@ from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
                             INJECT_TOKEN_JS)
 from product_parser import (API_CATEGORIES_PATH, API_CATEGORY_PATH,
                             API_SEARCH_PATH, BASE_URL, CANONICAL_HOST,
-                            PAGE_CAP, PAGE_SIZE, SELECTORS, api_request_for,
+                            PAGE_CAP, PAGE_SIZE, PAGE_URL_REASON,
+                            SELECTORS, api_request_for,
                             asset_reference_count, category_id_for_slug,
                             category_slug_from_url, detect_block_marker,
                             detect_page_state, is_woolworths_host,
@@ -285,7 +286,7 @@ def _count(page, selector: str) -> int:
         return 0
 
 
-def _fetch_api(page, path: str, body=None, timeout_ms: int = 45_000):
+def _fetch_api_raw(page, path: str, body=None, timeout_ms: int = 45_000):
     """Ask Woolworths' own API from inside the page. (status, payload, text)
 
     From INSIDE the page, not with `requests`, and that is the whole design:
@@ -947,6 +948,48 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
     return results, sorted(unattempted), exhausted.is_set()
 
 
+# Exceptions an API request can raise on this driver.
+API_ERRORS = (PWTimeout, PWError)
+
+
+def _fetch_api(session, path, body=None):
+    """Session-shaped wrapper, so the retry helper reads the same in all
+    three engines."""
+    return _fetch_api_raw(session.page, path, body)
+
+
+def _fetch_api_with_retries(session, args, path, body, page_num):
+    """`_fetch_api`, with the user's retry budget spent on it.
+
+    Bounded and backed off, like the navigation retry beside it. The fault
+    this absorbs is real and was measured: a live run hit
+    `TypeError: Failed to fetch` — the request rejected inside Akamai's own
+    hooked `window.fetch` — on page 1, and the same command a minute later
+    returned 153 rows. Retrying the navigation but not the API request left
+    the only call that actually fetches data unprotected.
+
+    Returns (status, payload, text). A refusal that survives the budget is
+    reported as PARTIAL by the caller, never as the end of the listing.
+    """
+    status = payload = None
+    text = ""
+    for attempt in range(1, max(1, args.retries) + 1):
+        try:
+            status, payload, text = _fetch_api(session, path, body)
+        except API_ERRORS as e:
+            status, payload, text = None, None, ""
+            logger.debug("API request raised: %s", e)
+        if status == 200 and payload is not None:
+            return status, payload, text
+        if attempt < max(1, args.retries):
+            pause = args.retry_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "The API request for page %d did not return usable JSON "
+                "(HTTP %s, %d bytes) — retrying in %.1fs (attempt %d/%d).",
+                page_num, status, len(text or ""), pause, attempt, args.retries)
+            time.sleep(pause)
+    return status, payload, text
+
 def _land(session, args, pool, outcome) -> tuple:
     """Make sure the browser is ON the listing page. (html, status, state)
 
@@ -1179,14 +1222,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
         page=page_num, page_size=args.page_size)
 
     errors_before = _api_error_count(session)
-    try:
-        status, payload, text = _fetch_api(session.page, path, body)
-    except (PWTimeout, PWError) as e:
-        logger.error("The API request for page %d failed: %s",
-                     page_num, _mask_credentials(str(e)))
-        outcome.load_failed = True
-        outcome.final_url = session.page.url
-        return outcome
+    status, payload, text = _fetch_api_with_retries(
+        session, args, path, body, page_num)
 
     if status != 200 or payload is None:
         # An API refusal is NOT the end of the listing, and must not be
@@ -1322,6 +1359,11 @@ def scrape(args) -> int:
 
     concurrency = max(1, args.concurrency)
     if concurrency > 1:
+        # Said out loud, because on several sites in this family the same
+        # flag is accepted and then refused, and a reader deserves to know
+        # which case they are in without reading the source.
+        logger.info("--concurrency %d is available here: %s.",
+                    concurrency, PAGE_URL_REASON)
         refusal = page_flow.concurrency_refusal(args.mode, args.url)
         if refusal:
             logger.warning("--concurrency %d is refused: %s.", concurrency, refusal)

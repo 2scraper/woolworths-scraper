@@ -598,6 +598,42 @@ def _confirm_with_dom(session, rows, page_num: int) -> Optional[dict]:
     return {"tiles": len(tiles), "checked": checked, "confirmed": confirmed}
 
 
+# Exceptions an API request can raise on this driver.
+API_ERRORS = (PyppeteerError, PPTimeout, TimeoutError)
+
+
+def _fetch_api_with_retries(session, args, path, body, page_num):
+    """`_fetch_api`, with the user's retry budget spent on it.
+
+    Bounded and backed off, like the navigation retry beside it. The fault
+    this absorbs is real and was measured: a live run hit
+    `TypeError: Failed to fetch` — the request rejected inside Akamai's own
+    hooked `window.fetch` — on page 1, and the same command a minute later
+    returned 153 rows. Retrying the navigation but not the API request left
+    the only call that actually fetches data unprotected.
+
+    Returns (status, payload, text). A refusal that survives the budget is
+    reported as PARTIAL by the caller, never as the end of the listing.
+    """
+    status = payload = None
+    text = ""
+    for attempt in range(1, max(1, args.retries) + 1):
+        try:
+            status, payload, text = _fetch_api(session, path, body)
+        except API_ERRORS as e:
+            status, payload, text = None, None, ""
+            logger.debug("API request raised: %s", e)
+        if status == 200 and payload is not None:
+            return status, payload, text
+        if attempt < max(1, args.retries):
+            pause = args.retry_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "The API request for page %d did not return usable JSON "
+                "(HTTP %s, %d bytes) — retrying in %.1fs (attempt %d/%d).",
+                page_num, status, len(text or ""), pause, attempt, args.retries)
+            time.sleep(pause)
+    return status, payload, text
+
 def _land(session, args, outcome):
     """Make sure the browser is ON the listing page. (html, status, state)
 
@@ -792,7 +828,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
         page=page_num, page_size=args.page_size)
 
     errors_before = _api_error_count(session)
-    status, payload, text = _fetch_api(session, path, body)
+    status, payload, text = _fetch_api_with_retries(
+        session, args, path, body, page_num)
 
     if status != 200 or payload is None:
         logger.error(
