@@ -808,6 +808,57 @@ def test_no_policy_constant_is_without_a_consumer():
 
 
 @check
+def test_the_engines_call_their_shared_helpers_the_same_way():
+    """The three engines must pass the same THING to a same-named helper.
+
+    This check exists because of a bug that reached main. A refactor changed
+    `_fetch_api` to take the SESSION rather than the page, and two engines
+    were updated while the Playwright one kept `_fetch_api(session.page, …)`
+    in `_resolve_target`. Arity was identical, so it bound fine; every
+    offline check passed; `--help` worked; a live SEARCH run passed, because
+    search never reaches that line. Only a live CATEGORY run failed, with
+    `'Page' object has no attribute 'page'`.
+
+    Comparing the ARGUMENT SPELLING across the three engines catches exactly
+    that: a signature change that lands in two of three files. It is §17's
+    call-binding check extended to a module's own helpers, where
+    `inspect.signature` cannot help because the types are not in the
+    signature.
+    """
+    import collections
+
+    watched = {"_fetch_api", "_read_tiles", "_confirm_with_dom",
+               "_rows_from_payload", "_land", "_resolve_target",
+               "_api_error_count", "_fetch_api_with_retries"}
+    # first-argument spelling, per helper, per engine
+    seen = collections.defaultdict(dict)
+    for name in ENGINE_NAMES:
+        tree = ast.parse((ROOT / f"{name}.py").read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in watched
+                    and node.args):
+                continue
+            first = ast.unparse(node.args[0])
+            seen[node.func.id].setdefault(name, set()).add(first)
+
+    problems = []
+    for helper, per_engine in sorted(seen.items()):
+        if len(per_engine) < 2:
+            continue          # only one engine calls it; nothing to compare
+        spellings = {frozenset(v) for v in per_engine.values()}
+        if len(spellings) > 1:
+            detail = ", ".join(f"{eng}={sorted(v)}"
+                               for eng, v in sorted(per_engine.items()))
+            problems.append(f"{helper}(): {detail}")
+    assert not problems, (
+        "the engines disagree about what to pass a shared-name helper — a "
+        "signature change that landed in some files and not others:\n  "
+        + "\n  ".join(problems))
+
+
+@check
 def test_undefined_names_in_every_module():
     """§10: compileall proves a file PARSES, not that its names RESOLVE.
 

@@ -330,7 +330,7 @@ def _fetch_api_raw(page, path: str, body=None, timeout_ms: int = 45_000):
     return status, payload, text
 
 
-def _read_tiles(page) -> List[dict]:
+def _read_tiles(session) -> List[dict]:
     """The rendered tiles, read THROUGH their open shadow roots.
 
     The grid is `<wc-product-tile>` custom elements whose content lives in
@@ -364,7 +364,7 @@ def _read_tiles(page) -> List[dict]:
         return out;
     }"""
     try:
-        return page.evaluate(js) or []
+        return session.page.evaluate(js) or []
     except (PWTimeout, PWError) as e:
         # A tile read is a nice-to-have: it confirms a price the API already
         # gave us. It must never take a run down.
@@ -822,7 +822,7 @@ def _confirm_with_dom(session, rows, page_num: int) -> Optional[dict]:
     key makes a wrong match impossible rather than unlikely, but asking the
     question at all on the wrong page is noise.
     """
-    tiles = _read_tiles(session.page)
+    tiles = _read_tiles(session)
     if not tiles:
         logger.info("No rendered tiles were readable on page %d; rows keep "
                     "price_source='api'.", page_num)
@@ -1071,7 +1071,7 @@ def _resolve_target(session, args, outcome) -> tuple:
     if slug in cached:
         return True, None, cached[slug], slug
 
-    status, tree, _ = _fetch_api(session.page, API_CATEGORIES_PATH, None)
+    status, tree, _ = _fetch_api(session, API_CATEGORIES_PATH, None)
     if status != 200 or not tree:
         logger.error("Could not read the category tree (%s %s). Without it a "
                      "slug cannot be turned into the opaque id the browse API "
