@@ -1363,6 +1363,37 @@ def test_fixtures_carry_no_tokens_or_shopper_fields():
 
 
 @check
+def test_diff_runs_reports_a_real_price_move():
+    """diff_runs.py was medium-scraper's: TRACKED_FIELDS was claps,
+    responses and reading time, none of which a Woolworths row has, so a
+    real price move diffed as "0 changed". Moves ONE value on a real sample
+    row at a time and requires exactly one reported change, and a run
+    against itself to report none."""
+    import copy
+    import diff_runs
+    rows = json.loads((ROOT / "sample_output.json").read_text(encoding="utf-8"))
+    same = diff_runs.diff_products(rows, copy.deepcopy(rows))
+    assert not (same["added"] or same["removed"] or same["changed"]), same
+    base = next(r for r in rows if isinstance(r.get("price"), (int, float))
+                and isinstance(r.get("cup_price"), (int, float)))
+    for field, value in (("price", round(base["price"] * 1.5 + 1, 2)),
+                         ("cup_price", round(base["cup_price"] * 2 + 1, 2)),
+                         ("is_in_stock", not base.get("is_in_stock")),
+                         ("is_on_special", not base.get("is_on_special"))):
+        moved = copy.deepcopy(rows)
+        moved[rows.index(base)][field] = value
+        res = diff_runs.diff_products(rows, moved)
+        assert len(res["changed"]) == 1, (field, res["changed"])
+        assert field in res["changed"][0]["changes"], (field, res["changed"])
+    # A price that moved together with price_source is not a price change.
+    moved = copy.deepcopy(rows)
+    moved[rows.index(base)]["price"] = base["price"] + 1
+    moved[rows.index(base)]["price_source"] = "dom"
+    res = diff_runs.diff_products(rows, moved)
+    assert not res["changed"] and len(res["source_changed"]) == 1, res
+
+
+@check
 def test_sample_output_matches_the_row_schema():
     sample = ROOT / "sample_output.json"
     assert sample.is_file(), "sample_output.json is missing"
