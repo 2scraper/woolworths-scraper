@@ -30,6 +30,11 @@ rather than leaving anyone to discover it from their own output.
 - **`.dockerignore` ignored another repo's output** (`vrbo_products.*`). It
   now ignores this repo's default `--out` prefix, `woolworths_products.*`.
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+- `captcha_solver.py`'s docstring pointed at a "No DataDome solver" section
+  that does not exist in this repo (it came with the copied core). Removed.
+
 ## [0.1.2] — 2026-09-16
 
 ### Fixed
