@@ -11,6 +11,30 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+> **`diff_runs.py` could not see a price change, and now can.** It was
+> medium-scraper's file: it tracked `claps`, `responses`, `reading_time_min`,
+> `word_count`, `content_chars`, `is_paywalled` and `publication`, and no
+> Woolworths row has any of them. Every price move diffed as "0 changed", and
+> `--fail-on-change` never fired. If you run it from cron, expect it to start
+> reporting.
+
+### Fixed
+
+- **`diff_runs.py` tracks this site's columns**: `price`, `original_price`,
+  `discount_pct`, `currency`, `cup_price`, `is_on_special`, `is_half_price`
+  and `is_in_stock`. A price that moves together with `price_source` goes to
+  `source_changed`, not `changed`. The summary prints price and currency
+  instead of claps and author, and the help text no longer talks about claps.
+  A new check moves one value at a time on a real `sample_output.json` row
+  and requires exactly one reported change. It fails against the old file.
+- **`.dockerignore` ignored another repo's output** (`vrbo_products.*`). It
+  now ignores this repo's default `--out` prefix, `woolworths_products.*`.
+
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+- `captcha_solver.py`'s docstring pointed at a "No DataDome solver" section
+  that does not exist in this repo (it came with the copied core). Removed.
+
 ## [0.1.2] — 2026-09-16
 
 ### Fixed

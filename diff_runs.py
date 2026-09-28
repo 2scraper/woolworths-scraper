@@ -4,41 +4,43 @@ diff_runs.py
 -------------
 Compares two output files from this project (JSON, as written by
 output_writer.save) and reports what changed between them, keyed on `sku` —
-the identifier the README tells people to diff on for tracking an answer's
-reception over time.
+the Woolworths stockcode, which is what the README tells people to diff on
+for price monitoring.
 
-    python3 diff_runs.py --old ml.2026-09-01.json \\
-                          --new ml.2026-09-07.json
+    python3 diff_runs.py --old milk.2026-09-01.json \\
+                          --new milk.2026-09-07.json
 
 Typical use is a scheduled re-run of one of the engines, kept under a dated
 filename, diffed against the previous one:
 
-    python3 playwright_scraper.py --url "$URL" --out "ml_$(date +%F)"
-    python3 diff_runs.py --old "ml_$(ls -t ml_*.json | sed -n 2p)" \\
-                          --new "ml_$(date +%F).json" --out diff.json
+    python3 playwright_scraper.py --url "$URL" --out "milk_$(date +%F)"
+    python3 diff_runs.py --old "$(ls -t milk_*.json | sed -n 2p)" \\
+                          --new "milk_$(date +%F).json" --out diff.json
 
-Four buckets, each keyed on sku — here the answer's permalink:
+Four buckets, each keyed on sku:
 
   added          — sku present in --new, absent from --old
-  removed        — sku present in --old, absent from --new (deleted or
-                   collapsed, or just off this particular feed run)
-  changed        — sku present in both, with a different clap count, response
-                   count, answer count, title or body length
-  source_changed — sku present in both with a different count, but also a
-                   different `data_source`. That is the bucket this site
-                   needs most: claps, responses, reading time and the full
-                   reading time and word count come from the view that
-                   built the row and are
-                   NULL on a row built from the rendered card alone, so a
-                   topic run diffed against a question run would report every
-                   count as having appeared or vanished. Reported separately
-                   because it says something about our own two snapshots, not
-                   about the site — and --fail-on-change deliberately ignores
-                   it.
+  removed        — sku present in --old, absent from --new (delisted, or just
+                   off this particular search/category run)
+  changed        — sku present in both, with a different price,
+                   original_price, discount_pct, currency, unit price
+                   (cup_price), special / half-price flag or stock flag
+  source_changed — sku present in both with a different price, but also a
+                   different `price_source`: one run read the price from the
+                   API with the rendered tile agreeing (`api+dom`) and the
+                   other from the API alone (`api`) or from the tile alone
+                   (`dom`). Reported separately because it says something
+                   about our own two snapshots, not about the shop — and
+                   --fail-on-change deliberately ignores it.
 
-An answer this project's parser could not recover a sku for (None) cannot be
+A product this project's parser could not recover a sku for (None) cannot be
 matched across runs at all, so it is counted and reported separately rather
 than silently folded into "added"/"removed", which would be wrong on its face.
+
+This file was medium-scraper's until 2026-09-23: it tracked claps, responses
+and reading time, none of which a Woolworths row has, so a real price move
+diffed as "0 changed". The check that pins the fix moves one price on a real
+sample row and requires it to be reported.
 """
 
 import argparse
@@ -50,37 +52,28 @@ from typing import Dict, List, Optional, Tuple
 
 from output_writer import UNIQUE_BY_SKU_MODES
 
-# What is worth watching on an answer. No price, currency, discount or stock
-# anywhere in this list, because this site has none of them — see
-# output_writer's docstring for why those columns do not exist on the row
-# either.
+# What a price monitor on a supermarket watches. Each of these is a column
+# the row carries (see output_writer.Product):
 #
-# `title` IS tracked, unusually for this family: it is the QUESTION, and
-# Woolworths lets a product be renamed and re-slugged.
-# That is a real
-# event and there is no other column that would show it.
+#   price, original_price, discount_pct, currency   the shelf price and the
+#                                                   was-price it is cut from
+#   cup_price       the unit price ("$2.35 / 1L"), which is how a 2L bottle
+#                   is compared against a 3L one, and which can move when a
+#                   pack size changes while the shelf price does not
+#   is_on_special, is_half_price   a promotion starting or ending
+#   is_in_stock     a product going out of stock
 #
-# `content_chars` rather than `content`: a story body runs to tens of
-# thousands of characters, and a diff that printed two of them per changed
-# row would be unreadable. The length moving is the signal that the body did.
-#
-# `is_paywalled` and `publication` are here because both genuinely change
-# without the product changing: Woolworths moves products between
-# behind the paywall, and a publication accepts or drops a submission after
-# it is published. Those are exactly the events a price monitor's equivalent
-# would want.
-TRACKED_FIELDS = ("claps", "responses", "reading_time_min", "word_count",
-                  "content_chars", "title", "is_paywalled", "publication")
+# NOT tracked: `is_sponsored`, which says whether this fetch served the row
+# as a promoted ad rather than anything about the product, and the
+# descriptive columns (ingredients, allergens, health stars), which change
+# rarely and would make a price diff noisy.
+TRACKED_FIELDS = ("price", "original_price", "discount_pct", "currency",
+                  "cup_price", "is_on_special", "is_half_price",
+                  "is_in_stock")
 
-# The subset of TRACKED_FIELDS whose presence depends on WHICH VIEW built the
-# row, and whose comparability therefore depends on both runs having read the
-# same one. `reading_time_min` and `word_count` are null on a tag-feed row and
-# populated on an archive row by the site's own design, and `content_chars`
-# is null on every listing row and populated only in post mode. A tag run
-# diffed against an archive or post run would otherwise report all of them as
-# having appeared from nowhere — see diff_products.
-COUNT_FIELDS = ("claps", "responses", "reading_time_min", "word_count",
-                "content_chars")
+# The subset of TRACKED_FIELDS whose comparability depends on price_source
+# matching between the two runs — see diff_products.
+PRICE_FIELDS = ("price", "original_price", "discount_pct", "cup_price")
 
 
 def _load(path: str) -> List[dict]:
@@ -109,26 +102,20 @@ def _by_sku(products: List[dict]) -> Tuple[Dict[str, dict], int]:
 
 def _within_tolerance(before: dict, after: dict, changes: dict,
                       tolerance_pct: float) -> bool:
-    """True if every differing count field moved by less than `tolerance_pct`.
+    """True if every differing price field moved by less than `tolerance_pct`.
 
-    Unlike in most of this family, this flag has a real use here and the
-    reason is worth stating. Woolworths' prices are LIVE: a measured row
-    carried 1,733 views, and a view count that ticks by a handful between two
-    runs of the same command is not an event anybody wants alerted on. A
-    monitor watching for a post going viral wants a threshold; a monitor
-    watching for an answer being edited wants `text_chars`, which is not a
-    count field and is never absorbed by this.
+    Inherited from this family, where a sibling site converts prices for a
+    cross-border visitor and the exchange rate ticks between two runs.
+    Woolworths quotes AUD to everyone and converts nothing, so every cent of
+    a difference is a real price move. The flag stays available and DEFAULTS
+    TO ZERO; set it non-zero only with a reason you can state.
 
-    It still DEFAULTS TO ZERO, because the default should report what
-    happened rather than decide for the reader what was interesting.
-
-    A move is judged on the LARGEST relative change among the count fields,
-    so a genuine collapse in claps is not hidden by a tolerance applied
-    field-by-field.
+    A move is judged on the LARGEST relative change among the price fields,
+    so a genuine cut is not hidden by a tolerance applied field-by-field.
     """
     if tolerance_pct <= 0:
         return False
-    for field in COUNT_FIELDS:
+    for field in PRICE_FIELDS:
         if field not in changes:
             continue
         was, now = before.get(field), after.get(field)
@@ -143,11 +130,7 @@ def _within_tolerance(before: dict, after: dict, changes: dict,
 
 def diff_products(old: List[dict], new: List[dict],
                   price_tolerance_pct: float = 0.0) -> dict:
-    """The four buckets. Named `diff_products` for the family's call shape.
-
-    `price_tolerance_pct` keeps the family's parameter name; on this site it
-    is a COUNT tolerance — see `_within_tolerance`.
-    """
+    """The four buckets, plus the tolerance bucket."""
     old_by_sku, old_unmatchable = _by_sku(old)
     new_by_sku, new_unmatchable = _by_sku(new)
 
@@ -165,52 +148,29 @@ def diff_products(old: List[dict], new: List[dict],
         if not field_changes:
             continue
 
-        # THE TWO RUNS READ DIFFERENT VIEWS, which is not a change in the
-        # answer — and on this site this is the bucket that matters most.
-        #
-        # Upvotes, views, shares, comments and the question answer count come
-        # from the payload the view carried, which an archive or author page
-        # carries and a topic page does not. So a row read off a topic feed
-        # has null counts and the same row read off its question page has
-        # real ones, and diffing the two would report every counter as having
-        # appeared from nowhere. `text_chars` moves for the same reason: a
-        # card body is truncated to three lines and the payload one is the
-        # whole answer.
-        #
-        # `--fail-on-change` ignores this bucket for the same reason it
-        # ignores a tolerance move: it says which view we read, not what
-        # changed on the site.
-        sources = (before.get("data_source"), after.get("data_source"))
-        view_fields = COUNT_FIELDS + ("text_chars",)
-        if sources[0] != sources[1] and any(
-                f in field_changes for f in view_fields):
-            view_part = {f: v for f, v in field_changes.items()
-                         if f in view_fields}
-            other_part = {f: v for f, v in field_changes.items()
-                          if f not in view_fields}
+        # A row whose price_source differs between runs is not comparable on
+        # price: one run had the API price confirmed against a rendered tile
+        # and the other did not, or fell back to the tile alone. The figures
+        # should agree, and when they do not, the difference is in how OUR
+        # two snapshots rendered, not in what the shop charges. Non-price
+        # fields still compare fine.
+        sources = (before.get("price_source"), after.get("price_source"))
+        if sources[0] != sources[1] and any(f in field_changes for f in PRICE_FIELDS):
+            price_part = {f: v for f, v in field_changes.items() if f in PRICE_FIELDS}
+            other_part = {f: v for f, v in field_changes.items() if f not in PRICE_FIELDS}
             source_changed.append({
                 "sku": sku, "title": after.get("title"),
-                "data_source": {"old": sources[0], "new": sources[1]},
-                "changes": view_part,
+                "price_source": {"old": sources[0], "new": sources[1]},
+                "changes": price_part,
             })
             field_changes = other_part
             if not field_changes:
                 continue
 
-        # There is no lifecycle bucket on this site, and its absence is a
-        # measurement rather than an omission. A sibling repo needs one
-        # because an auction closing moves a bid kind and the amount beside
-        # it in one event; an answer has no such state machine. What it does
-        # have -- being deleted or collapsed -- makes it vanish from the
-        # feed, which is the `removed` bucket. The `lifecycle` key is still
-        # emitted, always empty, so a consumer written against the family
-        # diff shape does not have to branch.
-
-        # A counter ticking rather than a real move -- see
-        # `_within_tolerance`. Only when the ONLY differences are count
-        # fields: a title or a body length changing alongside is a real
-        # change whatever the size of the move.
-        if (all(f in COUNT_FIELDS for f in field_changes)
+        # A move inside the tolerance — see _within_tolerance. Only when the
+        # ONLY differences are price fields: a stock or promotion change
+        # alongside is a real change whatever the size of the move.
+        if (all(f in PRICE_FIELDS for f in field_changes)
                 and _within_tolerance(before, after, field_changes,
                                       price_tolerance_pct)):
             within_tolerance.append({"sku": sku, "title": after.get("title"),
@@ -220,6 +180,8 @@ def diff_products(old: List[dict], new: List[dict],
         changed.append({"sku": sku, "title": after.get("title"),
                         "changes": field_changes})
 
+    # `lifecycle` is emitted always empty, so a consumer written against the
+    # family's diff shape does not have to branch.
     return {
         "added": added,
         "removed": removed,
@@ -235,16 +197,13 @@ def diff_products(old: List[dict], new: List[dict],
 def _print_summary(result: dict) -> None:
     print(f"[+] {len(result['added'])} added, {len(result['removed'])} removed, "
           f"{len(result['changed'])} changed, "
-          f"{len(result['source_changed'])} not comparable (the two runs read "
-          f"different views), "
-          f"{len(result.get('within_tolerance', []))} within the count "
+          f"{len(result['source_changed'])} not comparable on price, "
+          f"{len(result.get('within_tolerance', []))} within the price "
           f"tolerance.")
     for p in result["added"]:
-        print(f"  + {p.get('sku')}  {p.get('title')}  "
-              f"{p.get('claps')} clap(s) by {p.get('author')}")
+        print(f"  + {p.get('sku')}  {p.get('title')}  {p.get('price')} {p.get('currency')}")
     for p in result["removed"]:
-        print(f"  - {p.get('sku')}  {p.get('title')}  "
-              f"{p.get('claps')} clap(s) by {p.get('author')}")
+        print(f"  - {p.get('sku')}  {p.get('title')}  {p.get('price')} {p.get('currency')}")
     for c in result["changed"]:
         deltas = ", ".join(f"{f}: {v['old']!r} -> {v['new']!r}"
                            for f, v in c["changes"].items())
@@ -252,17 +211,16 @@ def _print_summary(result: dict) -> None:
     for c in result.get("within_tolerance", []):
         moves = ", ".join(
             f"{f}: {v['old']} -> {v['new']}" for f, v in c["changes"].items())
-        print(f"  ~ {c['sku']}  {c['title']}  {moves}  [within --price-"
-              f"tolerance-pct: a live counter ticking, not an event]")
+        print(f"  ~ {c['sku']}  {c['title']}  {moves}  [within "
+              f"--price-tolerance-pct]")
     for c in result["source_changed"]:
-        src = c["data_source"]
+        src = c["price_source"]
         deltas = ", ".join(f"{f}: {v['old']!r} -> {v['new']!r}"
                            for f, v in c["changes"].items())
         print(f"  ? {c['sku']}  {c['title']}  {deltas}  "
-              f"[data_source {src['old']!r} -> {src['new']!r}: the two runs "
-              f"read different views of the same answer, so this is not a "
-              f"site-side change. A topic feed carries no counts at all; a "
-              f"question or profile page does]")
+              f"[price_source {src['old']!r} -> {src['new']!r}: the two runs "
+              f"read the price differently, so this is not a site-side "
+              f"price change]")
     unmatchable = result["unmatchable_old"] + result["unmatchable_new"]
     if unmatchable:
         print(f"[!] {unmatchable} row(s) across both files had no sku or a "
@@ -292,9 +250,8 @@ def _check_comparable(args) -> bool:
     3 of 10 is missing every product on pages 4-10, and diffing it against
     yesterday's full run reports all of them as `removed` — reading as "these
     products were delisted" when in fact they were simply never fetched.
-    The counters of the SKUs both runs DID see are still comparable, which is
-    why this is a refusal with a --force escape hatch rather than a hard
-    error.
+    Prices of the SKUs both runs DID see are still comparable, which is why
+    this is a refusal with a --force escape hatch rather than a hard error.
     """
     problems = []
     modes = {}
@@ -307,7 +264,7 @@ def _check_comparable(args) -> bool:
             modes[label] = mode
         if mode and mode not in UNIQUE_BY_SKU_MODES:
             # This tool's whole premise is one row per `sku`, diffed on
-            # A mode that produces many rows per sku would give a diff
+            # price. A mode that produces many rows per sku would give a diff
             # whose every line is an artefact of two rows sharing an id, so
             # it is refused outright rather than answered. Both of this
             # repo's current modes qualify; the check is here so that adding
@@ -360,10 +317,9 @@ def _check_comparable(args) -> bool:
     if not problems:
         return True
 
-    # A generic headline, because the reasons below are no longer only about
-    # completeness: a mode mismatch and a reviews run are refused too, and a
-    # message naming the wrong reason sends the reader looking in the wrong
-    # place.
+    # A generic headline, because the reasons below are not only about
+    # completeness: a mode or host mismatch is refused too, and a message
+    # naming the wrong reason sends the reader looking in the wrong place.
     print("[!] Refusing to diff these two runs:")
     for line in problems:
         print(f"      {line}")
@@ -382,15 +338,11 @@ def parse_args():
                    help="Write the full diff as JSON to this path too.")
     p.add_argument("--price-tolerance-pct", type=float, default=0.0,
                    metavar="PCT",
-                   help="Treat a counter move smaller than PCT%% as a live "
-                        "counter ticking rather than an event: reported "
-                        "separately and ignored by --fail-on-change. Default 0 "
-                        "— report every tick. Unlike in most of this family "
-                        "the flag has a real use here: this site's price and "
-                        "clap counts are live, so a monitor watching for an "
-                        "answer taking off wants a threshold, while one "
-                        "watching for an edit wants text_chars, which this "
-                        "never absorbs.")
+                   help="Treat a price move smaller than PCT%% as noise "
+                        "rather than a price change: reported separately and "
+                        "ignored by --fail-on-change. Default 0 — Woolworths "
+                        "quotes AUD to everyone, so every cent is a real move. "
+                        "Set it non-zero only with a reason you can state.")
     p.add_argument("--fail-on-change", action="store_true",
                    help="Exit 1 if anything was added, removed or changed — "
                         "for a cron job that should only notify on a real diff.")
@@ -422,12 +374,10 @@ def main() -> int:
         print(f"[+] Full diff written to {args.out}")
 
     # Neither `source_changed` nor `within_tolerance` is a reason to fail.
-    # The first means our two runs read different views of the same answer;
-    # the second means a live counter ticked. Neither says anything about the
-    # site, and alerting on either would train whoever reads the alert to
-    # ignore it.
-    # Neither `source_changed` nor `within_tolerance` is a reason to fail —
-    # see their comments above.
+    # The first means our two runs read the price differently; the second
+    # means a move inside a tolerance the caller chose. Neither says
+    # anything about the shop, and alerting on either would train whoever
+    # reads the alert to ignore it.
     if args.fail_on_change and (result["added"] or result["removed"] or result["changed"]):
         return 1
     return 0

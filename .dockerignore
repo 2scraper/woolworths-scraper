@@ -11,7 +11,8 @@ __pycache__/
 .venv/
 venv/
 env/
-vrbo_products.*
+woolworths_products.*
+woolworths_products_*.*
 *_debug.html
 *_debug.png
 live_results/
