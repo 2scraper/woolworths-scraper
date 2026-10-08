@@ -9,6 +9,32 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
+## [Unreleased]
+
+### Fixed
+
+Two tails from the October audit that the first pass closed only half-way.
+Found by re-reading the audit against the code rather than against the
+commit message.
+
+- **`--proxy-block-retries` now says whether it counts attempts or
+  retries.** The audit asked for exactly that — "объяснить, число это
+  попыток или дополнительных повторов" — and v0.2.0 fixed the flag
+  reaching the policy while leaving the help reading "how many exits to
+  try", which says *total*. It is a count of RETRIES: the loop is
+  `range(N + 1)`, so 4 means up to 5 landings and 0 means try once. A
+  reader who set 1 expecting one attempt got two. A check now pins the
+  wording AND the arithmetic together, so the help cannot drift from the
+  loop.
+- **`diff_runs.py` refuses a file with no `.meta.json` beside it.** The
+  audit asked for a "строгий режим при отсутствии metadata"; without a
+  sidecar the completeness, mode, listing and store guards all `continue`d
+  in silence, so two unrelated runs diffed as 100% churn and looked like
+  news. `_run_status` had also described a missing sidecar as "the normal
+  case for a single-page run", which is false: `finish_run` writes one
+  whenever it writes rows. `--force` is the opt-out, the same one a partial
+  run already had.
+
 ## [0.3.0] — 2026-10-08
 
 ### Changed

@@ -2632,6 +2632,46 @@ def test_every_ops_method_reaches_a_session_attribute_that_exists():
         f"only {checked} of {len(ENGINE_NAMES)} engines had both a session "
         f"and an ops class — this check scanned less than it should")
 
+@check
+def test_the_block_retry_flag_says_whether_it_counts_attempts_or_retries():
+    """The audit asked for exactly this and the first fix did not give it.
+
+    The flag reached the policy (that was the bug) but the help still read
+    "how many exits to try", which says total. It is a count of RETRIES:
+    the loop is `range(N + 1)`, so 4 means up to 5 landings. A reader who
+    sets 1 expecting one attempt gets two.
+    """
+    for name in ENGINE_NAMES:
+        src = (ROOT / f"{name}.py").read_text(encoding="utf-8")
+        block = src.split('"--proxy-block-retries"', 1)[1][:600]
+        assert "EXTRA" in block and "RETRIES" in block, (
+            f"{name}'s help for --proxy-block-retries does not say whether "
+            f"N counts attempts or extra retries")
+    # And the arithmetic the help promises is the arithmetic the loop does.
+    flow = (ROOT / "page_flow.py").read_text(encoding="utf-8")
+    assert "range(block_retries_left + 1)" in flow, (
+        "the loop no longer does N+1 landings, so the help is now wrong")
+
+
+@check
+def test_diff_runs_refuses_a_file_with_no_sidecar():
+    """Strict, because without one every other guard is blind.
+
+    `_run_status` used to call a missing sidecar "the normal case for a
+    single-page run", and that was simply false — `finish_run` writes one
+    whenever it writes rows. So the only files without one are pre-sidecar
+    output, hand-edited files, or the leftovers of a failed run, and on all
+    three the completeness, mode, listing and store checks silently did
+    nothing. `--force` is the opt-out, the same one a partial run has.
+    """
+    src = (ROOT / "diff_runs.py").read_text(encoding="utf-8")
+    body = src.split("def _check_comparable", 1)[1].split("\ndef ", 1)[0]
+    i = body.index("if status is None:")
+    window = body[i:i + 700]
+    assert "problems.append" in window, (
+        "a file with no sidecar still skips every guard in silence")
+    assert "continue  # no sidecar" not in body
+
 def main() -> int:
     total = len(PASSES) + len(FAILURES)
     print()
