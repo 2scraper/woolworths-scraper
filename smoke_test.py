@@ -1904,9 +1904,12 @@ def test_an_output_file_is_not_private_to_the_user_that_wrote_it():
     So adopting an atomic write silently narrows every output, and breaks a
     consumer running as another account or as a container user — only once
     the write became atomic, which is the worst time to find out. Measured
-    2026-10-08, measured by calling each sibling's sidecar writer: of 43
-    repos, 8 produce a 0600 sidecar — exactly the ones that took `_atomic`
-    without this.
+    2026-10-08 by calling each sibling's sidecar writer: of 43 repos, 8
+    produce a 0600 sidecar — exactly the ones that took `_atomic` without
+    this.
+
+    A new file gets what `open()` would have given it: 0666 masked with the
+    umask, so 0644 under umask 022 and 0664 under umask 002.
     """
     previous = os.umask(0o022)
     try:
@@ -1923,6 +1926,55 @@ def test_an_output_file_is_not_private_to_the_user_that_wrote_it():
                     f"{suffix} came out {oct(mode)} rather than 0o644 under "
                     f"umask 022 — an atomic write that keeps the temp "
                     f"file's 0600 makes the output private to this user")
+    finally:
+        os.umask(previous)
+
+
+@check
+def test_a_permissive_umask_is_honoured_too():
+    """0666 masked, not a flat 0644.
+
+    The first version here used `0o644 & ~umask`, which is indistinguishable
+    from the right rule under the common umask 022 and quietly narrows 0664
+    to 0644 under 002 — so a group-writable output directory stops being
+    group-writable, which is exactly the setup where several accounts share
+    a scrape. `open(path, "w")` would have given 0664; so does this.
+    """
+    previous = os.umask(0o002)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.json")
+            output_writer.write_json(
+                [output_writer.Product(source="woolworths", url="u", sku="1",
+                                       title="t")], path)
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o664, (
+            f"umask 002 should give 0664, got {oct(mode)} — a flat 0644 "
+            f"narrows what the user deliberately left open")
+    finally:
+        os.umask(previous)
+
+
+@check
+def test_an_existing_target_keeps_the_mode_someone_gave_it():
+    """A save must not undo a tightening somebody did on purpose.
+
+    If an operator chmods an output to 0600 because it holds a price list
+    they are not ready to share, the next run should not reopen it. Only a
+    file that does not exist yet gets the umask default.
+    """
+    previous = os.umask(0o022)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.json")
+            rows = [output_writer.Product(source="woolworths", url="u",
+                                          sku="1", title="t")]
+            output_writer.write_json(rows, path)
+            os.chmod(path, 0o600)
+            output_writer.write_json(rows, path)
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o600, (
+            f"a deliberately tightened output was reopened to {oct(mode)}")
     finally:
         os.umask(previous)
 

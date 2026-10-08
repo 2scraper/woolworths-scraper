@@ -9,6 +9,28 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
+## [Unreleased]
+
+### Fixed
+
+- **The output-mode rule now matches the sibling that fixed this first.**
+  0.2.0 shipped `0o644 & ~umask`, which is indistinguishable from the right
+  rule under the common umask 022 and **quietly narrows 0664 to 0644 under
+  umask 002** — so a group-writable output directory, which is exactly the
+  setup where several accounts share a scrape, stops being group-writable.
+  It also overwrote the mode of an EXISTING target, undoing a tightening
+  somebody may have done on purpose.
+
+  `hackernews-scraper` had already solved both: an existing file keeps its
+  own mode, and a new one gets `0o666 & ~umask` — exactly what
+  `open(path, "w")` would have given it. Lifted verbatim. CLAUDE.md §16 says
+  to lift the sibling's fix rather than invent a second one, and this is
+  what inventing one costs: a variant that passes every check written for it
+  and is wrong on the umask nobody tested with.
+
+  Two new controls, each red on its own check: a flat 0644, and a save that
+  reopens a file somebody chmodded to 0600.
+
 ## [0.2.0] - 2026-10-08
 
 > **A write that died halfway destroyed the previous good output.** Every
