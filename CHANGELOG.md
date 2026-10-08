@@ -73,6 +73,15 @@ right and the other two not:
   every engine missing it fails by name. Instance attributes assigned in
   `__init__` count, including the tuple form (§26 records the first version
   of this check elsewhere missing those and reporting false positives).
+
+  It reads the engines **off disk, with no import** — which is the point,
+  and was wrong first time round. Written against the imported modules it
+  skipped for every engine whose driver is absent, so it covered one engine
+  of three locally and **zero in the offline CI job**, where it then failed
+  on its own "nothing was scanned" guard. §27.4 records exactly this trap
+  in exactly this kind of check. The suite now also runs in a bare
+  requirements-only venv locally, which is what CI's offline job is and
+  what would have caught it before the push.
 - **`test_the_shared_loop_runs_end_to_end_against_a_fake_driver`** — six
   cases through the whole decision tree offline, every answer from a real
   capture: a served page, the Akamai denial (blocked, retried, screenshot,

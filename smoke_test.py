@@ -44,7 +44,6 @@ import os
 import pathlib
 import re
 import stat
-import textwrap
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
@@ -2333,29 +2332,33 @@ def _required_ops():
     return names
 
 
-def _ops_class(engine_module):
-    for attr in dir(engine_module):
-        obj = getattr(engine_module, attr)
-        if isinstance(obj, type) and attr.endswith("Ops"):
-            return obj
+def _ops_class_node(engine_name):
+    """The engine's `*Ops` class, read off disk. NO import."""
+    tree = ast.parse((ROOT / f"{engine_name}.py").read_text(encoding="utf-8"))
+    for n in tree.body:
+        if isinstance(n, ast.ClassDef) and n.name.endswith("Ops"):
+            return n
     return None
 
 
-def _provided(cls):
-    """Class attributes PLUS whatever __init__ assigns to self."""
-    names = {n for n in dir(cls) if not n.startswith("__")}
-    try:
-        src = textwrap.dedent(inspect.getsource(cls.__init__))
-    except (OSError, TypeError):
-        return names
-    for node in ast.walk(ast.parse(src)):
+def _provided(cls_node):
+    """Methods and class attributes, PLUS whatever __init__ assigns to self."""
+    names = set()
+    for m in cls_node.body:
+        if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(m.name)
+        elif isinstance(m, ast.Assign):
+            for t in m.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+        elif isinstance(m, ast.AnnAssign) and isinstance(m.target, ast.Name):
+            names.add(m.target.id)
+    for node in ast.walk(cls_node):
         # `self.x = ...` and `self.x, self.y = ...` — the tuple form is the
-        # one §26 says the first version of this missed.
-        targets = []
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
+        # one §26 records the first version of this check missing.
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign)
+                   else [])
         for t in targets:
             for part in (t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]):
                 if (isinstance(part, ast.Attribute)
@@ -2367,26 +2370,35 @@ def _provided(cls):
 
 @check
 def test_every_engine_provides_every_operation_the_loop_asks_for():
-    """Derived from the loop, never from a list someone keeps up to date."""
+    """Derived from the loop, never from a list someone keeps up to date.
+
+    Read off DISK, with no engine import — which is the whole point and was
+    wrong in the first version. Written against the imported modules, this
+    skipped for every engine whose driver is absent, so it covered one
+    engine of three locally and ZERO in the offline CI job, where it then
+    failed on its own "nothing was scanned" guard. CLAUDE.md §27.4 records
+    exactly this trap in exactly this kind of check: a guard gated behind
+    the import is a guard that is quietest where it is needed most. It
+    needs no import, so it has none, and it now covers all three engines in
+    every environment.
+    """
     need = _required_ops()
     assert len(need) >= 15, (
         f"only {len(need)} operations derived — the loop stopped going "
         f"through `ops`, or this check stopped finding it")
     checked = 0
-    for name, mod in (("playwright_scraper", PW), ("selenium_scraper", SE),
-                      ("puppeteer_scraper", PP)):
-        if mod is None:
-            continue
-        cls = _ops_class(mod)
-        assert cls is not None, f"{name} has no *Ops class"
-        missing = sorted(need - _provided(cls))
+    for name in ENGINE_NAMES:
+        node = _ops_class_node(name)
+        assert node is not None, f"{name} has no *Ops class"
+        missing = sorted(need - _provided(node))
         assert not missing, (
-            f"{cls.__name__} is missing {missing}. The shared loop calls "
-            f"every one of these, so this engine would die on the page it "
-            f"first reaches — which is exactly the divergence §27.5 "
-            f"removed the triplication to prevent")
+            f"{name}.{node.name} is missing {missing}. The shared loop "
+            f"calls every one of these, so this engine would die on the "
+            f"page it first reaches — which is exactly the divergence "
+            f"§27.5 removed the triplication to prevent")
         checked += 1
-    assert checked, "no engine was available to check"
+    assert checked == len(ENGINE_NAMES), (
+        f"only {checked} of {len(ENGINE_NAMES)} engines were scanned")
 
 
 @check
