@@ -185,87 +185,13 @@ def _chrome_ua(chromium_version: str) -> str:
             f"(KHTML, like Gecko) Chrome/{chromium_version} Safari/537.36")
 
 
-@dataclass
-class PageOutcome:
-    """What one page produced.
-
-    Collected per page and merged afterwards rather than folded into shared
-    state as the loop goes: dedupe that mutates a running set inside the loop
-    makes the OUTPUT depend on the order pages happened to arrive in. Pages
-    are strictly sequential on this site, which is exactly why keeping the
-    merge order-independent costs nothing and keeps the family's contract.
-    """
-    page_num: int
-    url: str
-    final_url: Optional[str] = None
-    products: List = field(default_factory=list)
-    blocked_by: Optional[str] = None
-    load_failed: bool = False
-    state: Optional[str] = None
-    # How many results the site says the whole listing holds
-    # (`SearchResultsCount` / `TotalRecordCount`).
-    #
-    # NOT a per-page counter and never used as a gap. It is also NOT STABLE
-    # across pages, which is measured rather than assumed: a search for
-    # `saffron` reported 69 on page 1 and 0 on page 50. It goes in the
-    # sidecar beside what the run actually read, which is what makes the
-    # difference between the two visible rather than assumed.
-    stated_total: Optional[int] = None
-    # None, always, on this site: Woolworths numbers no rank on a listing, so
-    # there is no arithmetic gap to compute, and an unknown gap must not read
-    # the same as a gap of zero (§8).
-    gap: Optional[int] = None
-    # What the DOM cross-check found: how many rows had a rendered tile to
-    # compare against and how many agreed. None where no tile was readable.
-    dom_confirm: Optional[dict] = None
-    # API responses during this page's fetch that were not 200. A page whose
-    # document answered 200 while its API call was refused is a PARTIAL run,
-    # not a short listing.
-    api_errors: int = 0
-    # Whether the app bounced this browser to /unauthorisederror. Recorded
-    # rather than fatal: the rows are still the API's and still correct, but
-    # the grid is gone, so this is why price_source is 'api' everywhere.
-    unauthorised: bool = False
-
-    # A page whose PARSER produced nothing from a payload the site said
-    # held results. Separate from `load_failed` on purpose: the content
-    # arrived, so this is ours rather than the network's, and the log says
-    # so — but it must not count as a completed page.
-    #
-    # This was the audit's P1 and it is the family defect section 26 records
-    # binance hitting for real. The state was being SET and then discarded:
-    # `ok` consulted only the two fields below, so a parser failure came
-    # back as a page that succeeded with zero rows, which `advance_page`
-    # then read as the end of the listing. A three-page run over a renamed
-    # container reported exit 0, status complete, pagination_exhausted, an
-    # empty `pages_failed`, and page 1's rows — with the parser-failure
-    # ERROR printed two lines above it.
-    parse_failed: bool = False
-
-    @property
-    def ok(self) -> bool:
-        return (not self.load_failed and not self.parse_failed
-                and self.blocked_by is None)
-
-
-# The lowest share of rows that must carry both a title and a price before
-# the read is suspect. Measured on a 660-row corpus drawn from five search
-# terms and three category nodes on 2026-09-16: `DisplayName` was populated
-# on 660 of 660 and `Price` on 656 of 660 (99.4%). So the floor sits high;
-# 90% leaves room for the handful of unpriced, unavailable products without
-# hiding a broken read.
-#
-# There is deliberately NO brand floor beside it. `Brand` was populated on
-# 620 of 660 (93.9%), and the gap is unbranded fresh produce — a loose apple
-# has no brand — rather than a parse that missed it. A threshold there would
-# fire on a correct read of the fruit-and-veg department.
-FIELD_FLOOR = 90
-
-# The lowest share of DOM-checkable rows that must agree with the API's price
-# before the two views are treated as describing different pages. Only rows
-# that HAVE a rendered tile count toward it, so a page whose grid never
-# painted does not trip it — it reports no check at all instead.
-DOM_CONFIRM_FLOOR = 90
+# One definition each, in page_flow, shared by the three engines (§27.5),
+# with the measurements behind them written down there. Bound here so every
+# caller — the concurrent fetcher, `scrape`, the suite — keeps naming them
+# the way the family does.
+PageOutcome = page_flow.PageOutcome
+FIELD_FLOOR = page_flow.FIELD_FLOOR
+DOM_CONFIRM_FLOOR = page_flow.DOM_CONFIRM_FLOOR
 
 
 
@@ -538,6 +464,12 @@ class _BrowserSession:
     def __init__(self, pw, args, pool, remote: bool = False):
         self.pw, self.args, self.pool, self.remote = pw, args, pool, remote
         self.browser = self.context = self.page = None
+        # Which URL this session is currently landed on, or None. Declared
+        # here rather than created by the first assignment from outside:
+        # the shared loop reads it through its engine's ops object, and an
+        # attribute that only exists once something has written it is one
+        # rename away from an AttributeError nothing offline can see.
+        self.landed_url = None
 
     def open(self):
         if self.remote:
@@ -839,40 +771,6 @@ def _rows_from_payload(payload, args, page_num: int, data_source: str) -> List:
                                  data_source=data_source, host=CANONICAL_HOST)
 
 
-def _confirm_with_dom(session, rows, page_num: int) -> Optional[dict]:
-    """Confirm the API's prices against the rendered tiles.
-
-    A CONFIRMATION, never a correction: where the two agree the row's
-    `price_source` becomes `api+dom`, and where they disagree the row is left
-    exactly as the API gave it and a warning names the sku (§4).
-
-    Only meaningful for the page the browser is actually LOOKING at, which is
-    page 1 — pages 2..N are fetched over the API without navigating, so the
-    tiles on screen still belong to page 1 and matching them against page 2's
-    rows would confirm nothing and could mis-attribute a price. The stockcode
-    key makes a wrong match impossible rather than unlikely, but asking the
-    question at all on the wrong page is noise.
-    """
-    tiles = _read_tiles(session)
-    if not tiles:
-        logger.info("No rendered tiles were readable on page %d; rows keep "
-                    "price_source='api'.", page_num)
-        return None
-    confirmed, checked = overlay_dom_prices(rows, tiles)
-    share = (100.0 * confirmed / checked) if checked else 0.0
-    logger.info("DOM price confirmation on page %d: %d of %d row(s) checked "
-                "against %d rendered tile(s) agreed (%.0f%%).",
-                page_num, confirmed, checked, len(tiles), share)
-    if checked and share < DOM_CONFIRM_FLOOR:
-        logger.warning(
-            "Only %.0f%% of the rows checked against a rendered tile agreed "
-            "on price, against a measured floor of %d%%. That is the two "
-            "views of the same page disagreeing, which usually means the "
-            "grid re-rendered under the read. The rows are the API's and are "
-            "unchanged.", share, DOM_CONFIRM_FLOOR)
-    return {"tiles": len(tiles), "checked": checked, "confirmed": confirmed}
-
-
 # ===========================================================================
 # Workers — archive mode only
 # ===========================================================================
@@ -989,398 +887,107 @@ def _fetch_api(session, path, body=None):
     return _fetch_api_raw(session.page, path, body)
 
 
-def _fetch_api_with_retries(session, args, path, body, page_num):
-    """`_fetch_api`, with the user's retry budget spent on it.
+# ===========================================================================
+# The driver primitives the shared loop asks for
+# ===========================================================================
+# `page_flow.fetch_one_page` is ONE implementation for all three engines
+# (§27.5); this class is the only part of it that is Playwright's. Every
+# method is either a driver call or a two-line adapter, and no JavaScript
+# crosses the boundary in either direction — the shared module names the
+# OPERATION and this spells it in Playwright's dialect (§1).
+#
+# `smoke_test.py` derives the required method set from page_flow's own AST
+# rather than from a hand-written list, so the day the loop reaches for a
+# new operation, every engine missing it fails by name.
+class PlaywrightOps:
+    """Playwright's half of the page loop."""
 
-    Bounded and backed off, like the navigation retry beside it. The fault
-    this absorbs is real and was measured: a live run hit
-    `TypeError: Failed to fetch` — the request rejected inside Akamai's own
-    hooked `window.fetch` — on page 1, and the same command a minute later
-    returned 153 rows. Retrying the navigation but not the API request left
-    the only call that actually fetches data unprotected.
+    # The exception types the shared loop catches around a driver call.
+    driver_errors = (PWTimeout, PWError)
+    # Named in the one warning about the app bouncing us to
+    # /unauthorisederror, so the reader is told which flag was supposed to
+    # prevent it.
+    launch_arg_hint = LAUNCH_ARGS[0]
 
-    Returns (status, payload, text). A refusal that survives the budget is
-    reported as PARTIAL by the caller, never as the end of the listing.
-    """
-    status = payload = None
-    text = ""
-    for attempt in range(1, max(1, args.retries) + 1):
-        try:
-            status, payload, text = _fetch_api(session, path, body)
-        except API_ERRORS as e:
-            status, payload, text = None, None, ""
-            logger.debug("API request raised: %s", e)
-        if status == 200 and payload is not None:
-            return status, payload, text
-        if attempt < max(1, args.retries):
-            pause = args.retry_delay * (2 ** (attempt - 1))
-            logger.warning(
-                "The API request for page %d did not return usable JSON "
-                "(HTTP %s, %d bytes) — retrying in %.1fs (attempt %d/%d).",
-                page_num, status, len(text or ""), pause, attempt, args.retries)
-            time.sleep(pause)
-    return status, payload, text
+    def __init__(self, session):
+        self.session = session
+        # Cache for the category tree, filled by page_flow.resolve_target.
+        self.category_ids: dict = {}
 
-def _land(session, args, pool, outcome) -> tuple:
-    """Make sure the browser is ON the listing page. (html, status, state)
+    # -- where are we -------------------------------------------------
+    def is_live(self) -> bool:
+        return self.session.page is not None
 
-    Navigates only when it has to. The engine fetches every page of a listing
-    from inside ONE loaded page — the navigation exists to make Akamai issue
-    a session, not to reach page N — so this is a no-op after the first call
-    unless a rotation replaced the browser underneath us.
-    """
-    if getattr(session, "landed_url", None) == args.url and session.page:
-        try:
-            return session.page.content(), 200, "content"
-        except (PWTimeout, PWError):
-            session.landed_url = None
+    def is_landed(self, url: str) -> bool:
+        return getattr(self.session, "landed_url", None) == url
 
-    status = None
-    for attempt in range(1, args.retries + 1):
-        try:
-            resp = session.page.goto(args.url, wait_until="domcontentloaded",
-                                     timeout=60000)
-            status = resp.status if resp else None
-            break
-        except (PWTimeout, PWError) as e:
-            # A dead or misconfigured proxy raises PWError
-            # (net::ERR_PROXY_CONNECTION_FAILED), not PWTimeout — catching
-            # only the latter lets it escape as a traceback, which is the
-            # likeliest failure the first time anyone points --proxy-file at
-            # a real list (§8). They want opposite responses: a timeout
-            # deserves another try at the same exit, a dead proxy a
-            # different one.
-            reason = _proxy_failure(e)
-            if reason:
-                logger.error("Exit failed: %s", reason)
-                outcome.load_failed = True
-                return None, None, "blocked"
-            if attempt < args.retries:
-                pause = args.retry_delay * (2 ** (attempt - 1))
-                logger.warning("Timeout loading %s (attempt %d/%d) — retrying "
-                               "in %.1fs.", args.url, attempt, args.retries, pause)
-                time.sleep(pause)
-            else:
-                outcome.load_failed = True
-                return None, None, "blocked"
+    def set_landed(self, url: str) -> None:
+        self.session.landed_url = url
 
-    html = _content_when_settled(session.page) or ""
-    state = _classify(session.page, html, status)
-    if state != "blocked":
-        session.landed_url = args.url
-    return html, status, state
+    def clear_landing(self) -> None:
+        self.session.landed_url = None
 
+    def current_url(self):
+        return self.session.page.url if self.session.page else None
 
-def _resolve_target(session, args, outcome) -> tuple:
-    """What to ask the API for. (ok, term, category_id, slug)
+    # -- moving and reading -------------------------------------------
+    def goto(self, url: str, timeout_ms: int):
+        resp = self.session.page.goto(url, wait_until="domcontentloaded",
+                                      timeout=timeout_ms)
+        return resp.status if resp else None
 
-    A category id is OPAQUE and has to be looked up in the site's own tree:
-    `bakery` is `1_DEB537E`, `fruit-veg` is `1-E5BEE36E`. Sending the slug
-    instead returns HTTP 200 with zero products and `Success: true`, which is
-    indistinguishable from a real empty category — so an unresolved slug is
-    refused here rather than turned into a run that reports success on
-    nothing.
+    def document_text(self):
+        return _content_when_settled(self.session.page)
 
-    Cached on the session: the tree is 2,696 nodes and does not change
-    between pages of one run.
-    """
-    if args.mode == "search":
-        term = search_term_from_url(args.url)
-        if not term:
-            logger.error("No searchTerm parameter in %s. A search URL carries "
-                         "the term; there is deliberately no flag for it, "
-                         "because a flag could only ever disagree with the "
-                         "URL it was given.", args.url)
-            outcome.load_failed = True
-            return False, None, None, None
-        return True, term, None, None
+    def classify(self, html, status=None) -> str:
+        return _classify(self.session.page, html or "", status)
 
-    slug = category_slug_from_url(args.url)
-    cached = getattr(session, "category_ids", None)
-    if cached is None:
-        cached = session.category_ids = {}
-    if slug in cached:
-        return True, None, cached[slug], slug
+    def count(self, selector: str) -> int:
+        return _count(self.session.page, selector)
 
-    status, tree, _ = _fetch_api(session, API_CATEGORIES_PATH, None)
-    if status != 200 or not tree:
-        logger.error("Could not read the category tree (%s %s). Without it a "
-                     "slug cannot be turned into the opaque id the browse API "
-                     "needs.", API_CATEGORIES_PATH, status)
-        outcome.load_failed = True
-        return False, None, None, None
+    def wait_ms(self, ms: int) -> None:
+        self.session.page.wait_for_timeout(ms)
 
-    node_id = category_id_for_slug(tree, slug or "")
-    if not node_id:
-        logger.error(
-            "%r is not a category node on this site. It is not a typo in the "
-            "code: the slug was looked up in Woolworths' own tree "
-            "(%s, %d nodes) and is not in it. Check the URL in a browser.",
-            slug, API_CATEGORIES_PATH,
-            sum(1 for _ in iter_category_nodes(tree)))
-        outcome.load_failed = True
-        return False, None, None, None
+    def screenshot(self, path: str) -> None:
+        self.session.page.screenshot(path=path)
 
-    cached[slug] = node_id
-    logger.info("Category %r resolves to node id %s.", slug, node_id)
-    return True, None, node_id, slug
+    def read_tiles(self):
+        return _read_tiles(self.session)
+
+    # -- the site's own API -------------------------------------------
+    def fetch_api(self, path: str, body=None):
+        return _fetch_api(self.session, path, body)
+
+    def api_error_count(self) -> int:
+        return _api_error_count(self.session)
+
+    def rows_from_payload(self, payload, args, page_num: int, data_source):
+        return _rows_from_payload(payload, args, page_num, data_source)
+
+    # -- recovery ------------------------------------------------------
+    def proxy_failure(self, exc):
+        return _proxy_failure(exc)
+
+    def relaunch(self) -> None:
+        self.session.relaunch()
+
+    def handle_captcha(self, args, allow_solve: bool, budget) -> bool:
+        return handle_captcha_if_present(self.session.page, args,
+                                         allow_solve=allow_solve,
+                                         budget=budget)
 
 
 def _fetch_one_page(session, args, pool, page_num: int,
-                    url: Optional[str] = None) -> PageOutcome:
-    """Fetch one page of the listing and parse it.
+                    url: Optional[str] = None):
+    """Thin wrapper over the shared loop, kept for the family's signature.
 
-    `url` is accepted for the family's signature and is the LISTING's
-    address, the same for every page: on this site a page is a number in a
-    request body, not an address. Passing it keeps the concurrent fetcher's
-    call shape identical to its siblings'.
-
-    Returns a PageOutcome and never raises for an EXPECTED failure — a
-    timeout, a refusal, a dead exit are all recorded on the outcome instead.
-
-    Always goes through `session.page`, never a captured local: a rotation
-    replaces the browser, context and page together, and a stale handle is
-    exactly the bug _BrowserSession exists to prevent.
+    The concurrent fetcher and the sequential loop both call this, and both
+    hand it a session rather than an ops object.
     """
-    outcome = PageOutcome(page_num=page_num, url=url or args.url)
-    has_pool = bool(pool and len(pool) > 1)
-    block_retries = page_flow.block_retries(
-        has_pool, getattr(args, "proxy_block_retries", None))
-
-    html = state = None
-    # Per PAGE, not per attempt: the whole point is that retrying
-    # the same page does not buy a second solve for it.
-    solve_budget = page_flow.SolveBudget()
-
-    for block_attempt in range(block_retries + 1):
-        outcome.load_failed = False
-        html, status, state = _land(session, args, pool, outcome)
-
-        # The POLICY decides whether another fetch could change this
-        # answer, rather than each engine deciding for itself (section 1).
-        # False for content, shell and empty; True for blocked and unknown.
-        if not page_flow.should_retry(state) and not outcome.load_failed:
-            break
-
-        if block_attempt < block_retries:
-            # A rotation is a FRESH BROWSER (§8). Cookies Akamai issued
-            # against exit A and replayed from exit B are a stronger signal
-            # than either address alone, and Akamai session cookies are
-            # exactly what this site issues.
-            if pool and page_flow.RETRY_NEEDS_FRESH_CONTEXT:
-                try:
-                    # `advance()`, not `rotate()`: ProxyPool stores the
-                    # rotation MODE as `self.rotate`, so `pool.rotate()`
-                    # is a string and calling it raised TypeError — a
-                    # crash (exit 1) on every rotation, in all three
-                    # engines, on the one path a pool exists for.
-                    pool.advance("refused by the site")
-                except ProxyError as e:
-                    logger.warning("Could not rotate the exit: %s", e)
-            session.landed_url = None
-            logger.warning("Refused (attempt %d of %d) — relaunching%s.",
-                           block_attempt + 1, block_retries + 1,
-                           " on the next exit" if has_pool else "")
-            try:
-                session.relaunch()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Relaunch failed: %s", e)
-            time.sleep(args.retry_delay)
-
-    # Detection runs on every page, whatever the state — a challenge that
-    # nobody recognises becomes an empty category months later (section 8).
-    # Whether a SOLVE may be bought is page_flow's call.
-    try:
-        if args.solve_captcha != "never" and session.page is not None:
-            if handle_captcha_if_present(session.page, args,
-                                         allow_solve=page_flow.should_solve(state),
-                                         budget=solve_budget):
-                html = _content_when_settled(session.page) or html
-                state = _classify(session.page, html, None)
-    except (PWTimeout, PWError) as e:
-        logger.debug("captcha check skipped: %s", e)
-
-    outcome.state = state
-
-    if outcome.load_failed and state != "blocked":
-        outcome.final_url = session.page.url if session.page else args.url
-        return outcome
-
-    if page_flow.counts_as_blocked(state):
-        debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        try:
-            session.page.screenshot(path=f"{args.out}_page{page_num}_debug.png")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Could not capture screenshot: %s", e)
-        refs = asset_reference_count(html or "")
-        marker = detect_block_marker(html or "")
-        logger.error(
-            "The site did not serve this request — %d bytes, %d reference(s) "
-            "to the site's own asset host, saved to %s. This is exit 3, "
-            "distinct from a genuinely empty result (exit 4).%s",
-            len(html or ""), refs, debug_html,
-            (f" Tried {block_retries + 1} exit(s)." if has_pool
-             else f" Re-fetched {block_retries + 1} time(s)."))
-        logger.error("%s", page_flow.block_advice(
-            html, headless=bool(getattr(args, "headless", False)),
-            has_pool=has_pool))
-        outcome.blocked_by = marker or ("no-response" if not html else "akamai")
-        outcome.final_url = session.page.url if session.page else args.url
-        return outcome
-
-    # Wait for the grid. BOUNDED, and not fatal if it never paints: an empty
-    # category renders no tiles, and treating that as a failure would report
-    # a correct answer as a fault.
-    if page_num == 1:
-        found = page_flow.wait_for_tiles(
-            lambda sel: _count(session.page, sel),
-            session.page.wait_for_timeout,
-            page_flow.ready_selector(args.mode), _min_matches(args, html))
-        logger.info("%d tile(s) had painted when the API was asked.", found)
-        # Said LOUDLY, because nothing else in the run will notice: the
-        # document answered 200, the API is about to answer 200, and the rows
-        # will be correct. Only the address gives it away.
-        if is_unauthorised_redirect(session.page.url):
-            outcome.unauthorised = True
-            logger.warning(
-                "The app navigated itself to %s — it has decided this "
-                "browser is automated, and the product grid will not render. "
-                "The rows below still come from the site's own API and are "
-                "correct, but the DOM price cross-check is impossible and "
-                "price_source stays 'api' on every row. This engine passes "
-                "%s to prevent it, so seeing this means either the flag did "
-                "not take effect or the site now looks at something else.",
-                session.page.url, LAUNCH_ARGS[0])
-
-    ok, term, category_id, slug = _resolve_target(session, args, outcome)
-    if not ok:
-        outcome.final_url = session.page.url if session.page else args.url
-        return outcome
-
-    path, body, data_source = api_request_for(
-        args.mode, term=term, category_id=category_id, slug=slug,
-        page=page_num, page_size=args.page_size)
-
-    errors_before = _api_error_count(session)
-    status, payload, text = _fetch_api_with_retries(
-        session, args, path, body, page_num)
-
-    if status != 200 or payload is None:
-        # An API refusal is NOT the end of the listing, and must not be
-        # reported as one: the document answers 200 while the API behind it
-        # is throttled, so a run that collapsed the two would claim a
-        # complete run holding page 1 (§7).
-        logger.error(
-            "POST %s for page %d answered HTTP %s with %d byte(s) that %s "
-            "JSON. This is not the end of the listing — the run is reported "
-            "as PARTIAL (exit 6) rather than complete. Raise --delay (it is "
-            "%.1fs now), or spread the load with --proxy-file.",
-            path, page_num, status, len(text or ""),
-            "are not" if payload is None else "is",
-            args.delay)
-        outcome.load_failed = True
-        outcome.state = "api_error"
-        outcome.final_url = session.page.url
-        return outcome
-
-    if args.dump_html:
-        # Dumping on success, not only on failure: a run can return the right
-        # NUMBER of rows with a field silently unpopulated, and then the only
-        # way to tell a parsing bug from a too-early snapshot is the exact
-        # bytes. On this site the bytes that matter are the API's, not the
-        # document's, so BOTH are written.
-        base = (args.dump_html if args.pages == 1
-                else f"{args.dump_html}.page{page_num}")
-        with open(base, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        with open(f"{base}.api.json", "w", encoding="utf-8") as f:
-            f.write(text or "")
-        logger.info("Saved the document to %s (%d bytes) and the payload the "
-                    "parser actually reads to %s.api.json (%d bytes).",
-                    base, len(html or ""), base, len(text or ""))
-
-    products = _rows_from_payload(payload, args, page_num, data_source)
-    stated = total_count(payload)
-    organic = organic_count(products)
-    logger.info("Parsed %d row(s) from page %d — %d organic, %d promoted.%s",
-                len(products), page_num, organic, len(products) - organic,
-                f" The site states {stated} result(s) for this listing."
-                if stated is not None else "")
-
-    outcome.stated_total = stated
-    outcome.api_errors = _api_error_count(session) - errors_before
-
-    if products and page_num == 1:
-        outcome.dom_confirm = _confirm_with_dom(session, products, page_num)
-
-    if products:
-        # Counted over the rows that CAN carry a price. Woolworths publishes
-        # none for a product it is not selling: on one fruit-veg page 6 of 73
-        # rows had no price and every one of the 6 was `IsAvailable: false`,
-        # while 67 of the 67 available rows had one. Counting those 6 against
-        # the floor printed a warning about a completely correct read, and a
-        # warning that fires when nothing is wrong teaches people to ignore
-        # warnings.
-        sellable = [p for p in products if p.is_available is not False]
-        with_title = sum(1 for p in products if p.title)
-        with_price = sum(1 for p in sellable if p.price is not None)
-        title_share = 100.0 * with_title / len(products)
-        price_share = (100.0 * with_price / len(sellable)) if sellable else 100.0
-        share = min(title_share, price_share)
-        logger.info("Coverage on page %d: title %d/%d, price %d/%d of the "
-                    "sellable rows (%.0f%% at worst); the measured floor is "
-                    "%d%%.%s", page_num, with_title, len(products),
-                    with_price, len(sellable), share, FIELD_FLOOR,
-                    f" {len(products) - len(sellable)} row(s) are "
-                    f"unavailable and carry no price by design."
-                    if len(sellable) != len(products) else "")
-        if share < FIELD_FLOOR:
-            logger.warning(
-                "Only %.0f%% of page %d carries both a title and a price, "
-                "against a measured floor of %d%%. On a 660-row corpus the "
-                "API carried a title on 100%% and a price on 99.4%%, so this "
-                "is the read breaking rather than the catalogue being "
-                "unusual. Re-run with --dump-html and look at the "
-                ".api.json.", share, page_num, FIELD_FLOOR)
-    elif stated == 0:
-        # A genuinely empty listing, and the site says so itself. NOT a
-        # parser problem, and saying so matters: the two want different
-        # readers doing different things (section 20). The run still reports
-        # exit 4 — the catalogue question was answered and the answer was
-        # nothing — but nothing is dumped and nobody is sent to debug a read
-        # that worked.
-        logger.info(
-            "The site reports 0 results for this listing, and 0 rows were "
-            "parsed. That is a correct, empty answer rather than a failed "
-            "read — exit 4.")
-        outcome.state = "empty"
-    else:
-        # The site said it HAS results and the parser produced none. That is
-        # ours, and it is the case section 20 asks to be named rather than
-        # reported as "0 products", which sends the reader to check the URL
-        # instead of the payload.
-        debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        with open(f"{debug_html}.api.json", "w", encoding="utf-8") as f:
-            f.write(text or "")
-        outcome.state = "parse_failed"
-        outcome.parse_failed = True
-        logger.error(
-            "The site states %s result(s) for this listing and the parser "
-            "produced NONE. That is a parser failure, not an empty "
-            "category. Saved the document to %s and the payload to "
-            "%s.api.json — the likeliest cause is that the group wrapper "
-            "shape changed, so check whether `Products`/`Bundles` still "
-            "holds one level of wrapper objects.",
-            stated, debug_html, debug_html)
-
-    outcome.products = products
-    outcome.final_url = session.page.url
-    return outcome
-
+    ops = getattr(session, "_ops", None)
+    if ops is None:
+        ops = session._ops = PlaywrightOps(session)
+    return page_flow.fetch_one_page(ops, args, pool, page_num, url)
 
 def _stop_reason_for(outcome) -> str:
     """Why the walk stopped, named by what actually went wrong.
