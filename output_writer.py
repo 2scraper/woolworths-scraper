@@ -221,6 +221,27 @@ class Product:
 
     image_url: Optional[str] = None              # 100%
 
+    # WHICH STORE these prices are for. `FulfilmentStoreId`, 100% populated
+    # and 1101 on all 660 rows of the measured corpus — one store, because a
+    # session that has not chosen one gets Woolworths' default.
+    #
+    # It is a column rather than a sidecar field, and the reason is section
+    # 8's: a price is only a fact about a place. Without it two runs cannot
+    # tell a price CHANGE from a different store's price, and a consumer
+    # doing price monitoring is comparing numbers whose scope is unstated.
+    # The site itself names it twice in its own bootstrap
+    # (`GetDeliveryInfoRequest.FulfilmentStoreId`,
+    # `ShopperRequest.FulfilmentStoreId`), so this is the site's own id and
+    # not an inference.
+    #
+    # This repo does NOT yet let you choose the store: the endpoints that
+    # would set one are not implemented here, though the site does publish a
+    # store list (`/apis/ui/StoreLocator/Stores?postcode=…` answers 200 with
+    # real stores). Until it does, every run is the default store and the
+    # column says which one — which is the honest half, and the half a
+    # consumer needs before trusting a price diff.
+    store_id: Optional[str] = None
+
     # --- provenance ---------------------------------------------------------
     # WHICH of the site's answers built this row.
     #

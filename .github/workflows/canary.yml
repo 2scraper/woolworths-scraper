@@ -31,6 +31,17 @@ on:
   schedule:
     - cron: "17 19 * * *"       # 05:17 Australian eastern time, off-peak
   workflow_dispatch:
+    inputs:
+      force_live:
+        description: >-
+          Run the live steps even with no WOOLWORTHS_PROXY secret. This
+          exists to MEASURE whether a GitHub runner can reach this site at
+          all: the skip below was written from a measurement of headless
+          against headful on one datacentre address, and whether GitHub's
+          own addresses are served headful was never tested. A canary that
+          can pass without a credential must not be gated on one.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,6 +52,8 @@ jobs:
     timeout-minutes: 25
     env:
       HAVE_PROXY: ${{ secrets.WOOLWORTHS_PROXY != '' }}
+      # Either a real exit, or an explicit request to measure without one.
+      RUN_LIVE: ${{ secrets.WOOLWORTHS_PROXY != '' || inputs.force_live }}
 
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +63,7 @@ jobs:
           python-version: "3.12"
 
       - name: Explain the skip and stop
-        if: env.HAVE_PROXY != 'true'
+        if: env.RUN_LIVE != 'true'
         run: |
           echo "::notice::No WOOLWORTHS_PROXY secret is set, so the live run is skipped rather than failed."
           {
@@ -70,14 +83,14 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install the Playwright engine
-        if: env.HAVE_PROXY == 'true'
+        if: env.RUN_LIVE == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-playwright.txt
           playwright install --with-deps chromium
 
       - name: Install Xvfb
-        if: env.HAVE_PROXY == 'true'
+        if: env.RUN_LIVE == 'true'
         # Headful, not headless, and that is the measurement above rather
         # than a preference. A runner has no display, so the browser gets a
         # virtual one.
@@ -88,7 +101,7 @@ jobs:
       # a sibling repo — and on this site page 2 onward is where the
       # ads-repeat-forever behaviour lives (§7).
       - name: Run the canary
-        if: env.HAVE_PROXY == 'true'
+        if: env.RUN_LIVE == 'true'
         id: run
         env:
           WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}
@@ -108,7 +121,7 @@ jobs:
           echo "The run exited $code."
 
       - name: Interpret the exit code
-        if: env.HAVE_PROXY == 'true'
+        if: env.RUN_LIVE == 'true'
         run: |
           case "${{ steps.run.outputs.exit_code }}" in
             0) echo "::notice::Run completed." ;;
@@ -124,7 +137,7 @@ jobs:
       # a broken read cannot pass. Bakery held 575 products over 16 pages;
       # three pages is ~110 rows, of which a handful are ads.
       - name: Assert what the run actually produced
-        if: env.HAVE_PROXY == 'true'
+        if: env.RUN_LIVE == 'true'
         run: |
           python3 - <<'PY'
           import json, sys
@@ -202,7 +215,7 @@ jobs:
           PY
 
       - name: Upload artefacts
-        if: always() && env.HAVE_PROXY == 'true'
+        if: always() && env.RUN_LIVE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: canary-${{ github.run_id }}

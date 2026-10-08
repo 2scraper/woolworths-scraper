@@ -772,6 +772,7 @@ def product_from_api(node: dict, *, page: Optional[int] = None,
         storage_instructions=_attr(node, "storageinstructions"),
 
         image_url=_text(node.get("LargeImageFile")) or _text(node.get("MediumImageFile")),
+        store_id=_text(node.get("FulfilmentStoreId")),
 
         data_source=data_source,
         page=page,

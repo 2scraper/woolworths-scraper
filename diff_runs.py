@@ -297,6 +297,40 @@ def _check_comparable(args) -> bool:
     # `woolworths.co.nz` and `woolworths.co.za` are different companies and
     # `product_parser` refuses both by name, so a run cannot quietly hold
     # rows from one of them.
+    # WHICH LISTING each run read, from its own sidecar.
+    #
+    # Two complete runs of DIFFERENT categories passed every guard here and
+    # diffed cleanly: same mode, same host, so `added` and `removed` were
+    # the whole of both files — a 100% churn report about two things that
+    # were never the same question. The sidecar already recorded
+    # `start_url`, so the information was on disk and simply unread.
+    #
+    # Compared by the sidecar's `listing` where present and by `start_url`
+    # otherwise, so a pair written before that field existed still compares.
+    listings = {}
+    stores = {}
+    for label, path in (("--old", args.old), ("--new", args.new)):
+        meta_path = pathlib.Path(str(path).rsplit(".json", 1)[0] + ".meta.json")
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        listings[label] = meta.get("listing") or meta.get("start_url")
+        if meta.get("store_ids"):
+            stores[label] = tuple(meta["store_ids"])
+    if len(set(listings.values())) > 1:
+        problems.append(
+            f"the two runs read different listings ({listings}). Every row "
+            f"would be reported added or removed, which says nothing about "
+            f"the catalogue and everything about the two URLs.")
+    if len(set(stores.values())) > 1:
+        problems.append(
+            f"the two runs were served different fulfilment stores "
+            f"({stores}). Woolworths prices per store, so a price "
+            f"difference here is a difference of PLACE rather than of time.")
+
     sources = {}
     for label, path in (("--old", args.old), ("--new", args.new)):
         try:

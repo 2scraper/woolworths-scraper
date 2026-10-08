@@ -11,6 +11,19 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+> **A parser failure was reported as a COMPLETE run.** If a run ever logged
+> "the parser produced NONE" it still exited 0 with `status: complete` and an
+> empty `pages_failed`, so a scheduled job accepted a truncated file as a
+> good one. Re-run anything that matters. Found by a third-party audit on
+> 2026-10-08 and reproduced here on the audited commit.
+
+> **Any run with a proxy pool CRASHED when it met a refusal.** The engines
+> called `pool.rotate()`, which is the rotation mode STRING rather than a
+> method, so a refused page raised `TypeError: 'str' object is not callable`
+> — exit 1, in all three engines, on the one path a pool exists for. Not in
+> the audit; found while reproducing its third finding, which could not be
+> reached because of it.
+
 > **`diff_runs.py` could not see a price change, and now can.** It was
 > medium-scraper's file: it tracked `claps`, `responses`, `reading_time_min`,
 > `word_count`, `content_chars`, `is_paywalled` and `publication`, and no
@@ -20,6 +33,35 @@ rather than leaving anyone to discover it from their own output.
 
 ### Fixed
 
+- **A page whose parser produced nothing is no longer a completed page.**
+  `parse_failed` was being SET and then discarded: `PageOutcome.ok`
+  consulted only `load_failed` and `blocked_by`, so the page counted as
+  fetched-with-zero-rows and `advance_page` read that as the end of the
+  listing. Reproduced with a renamed payload container: exit 0, `complete`,
+  `pagination_exhausted`, `pages_failed: []`. Now exit 6, `partial`,
+  `stop_reason: parser_found_nothing`, the page listed by number, and the
+  rows already gathered kept. This is the defect CLAUDE.md §26 records
+  binance-scraper hitting for real.
+- **`pool.advance(reason)`, not `pool.rotate()`** — see the note above. The
+  reason is required, and a first fix that called `pool.advance()` swapped
+  one `TypeError` for another; the check that caught that reads the AST
+  rather than the source text, because the first version of IT matched the
+  comment explaining the bug.
+- **`--proxy-block-retries` reaches the retry policy.** It parsed,
+  defaulted and changed nothing — a CLI flag with no reader. `0` is now
+  honoured as a meaningful value rather than treated as unset, and the flag
+  applies only with a pool, because without one there is nothing to rotate
+  to.
+- **The page cap is inclusive, and both branches share one plan.**
+  `page_cap_reached` used `>=`, so `--pages 200` fetched 199 while `--help`
+  promised 200; and the concurrent branch built its own unbounded
+  `range(2, args.pages + 1)`, so `--pages 201 --concurrency 2` planned page
+  201 against a cap of 200. One `planned_pages()`, built before the
+  sequential/concurrent choice.
+- **`diff_runs.py` refuses two runs of different listings, or of different
+  fulfilment stores.** Two complete runs of different categories passed
+  every guard and diffed as 100% churn — same mode, same host. The sidecar
+  already carried `start_url`; it was simply unread.
 - **`diff_runs.py` tracks this site's columns**: `price`, `original_price`,
   `discount_pct`, `currency`, `cup_price`, `is_on_special`, `is_half_price`
   and `is_in_stock`. A price that moves together with `price_source` goes to
@@ -34,6 +76,26 @@ rather than leaving anyone to discover it from their own output.
   both. "Supported versions" now names the latest release and `main`.
 - `captcha_solver.py`'s docstring pointed at a "No DataDome solver" section
   that does not exist in this repo (it came with the copied core). Removed.
+
+### Added
+
+- **`store_id` on every row**, read from the payload's own
+  `FulfilmentStoreId` (100% populated, and 1101 on all 660 rows of the
+  measured corpus — one store, because a session that has not chosen one
+  gets Woolworths' default). Woolworths prices per fulfilment store, so
+  without this column two runs cannot tell a price CHANGE from a different
+  store's price. This repo does not implement choosing a store; the column
+  says which one you were served, which is the half a price diff needs
+  before it can be trusted.
+- **`listing` and `store_ids` in the sidecar.** `--category` was parsed,
+  defaulted from the URL, and then read by nothing — not a column, not the
+  sidecar, not the log.
+- **A `force_live` input on the canary.** The live steps were gated on a
+  proxy secret that has never been set, so every green run since the repo
+  went public has been the skip branch. Whether a GitHub runner is served
+  at all was never measured — this is what measures it, and §§21/24 say a
+  canary that CAN pass without a credential must not be gated on one.
+
 
 ## [0.1.2] — 2026-09-16
 

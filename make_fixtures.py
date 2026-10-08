@@ -78,7 +78,7 @@ _KEEP = (
     "CupString", "PackageSize", "Unit", "IsOnSpecial", "IsHalfPrice",
     "IsSponsoredAd", "AdStatus", "OfferId", "IsAvailable", "IsInStock",
     "IsPurchasable", "SupplyLimit", "LargeImageFile", "MediumImageFile",
-    "UrlFriendlyName", "AdditionalAttributes",
+    "UrlFriendlyName", "AdditionalAttributes", "FulfilmentStoreId",
 )
 _KEEP_ATTRS = (
     "sapdepartmentname", "sapcategoryname", "sapsubcategoryname",
