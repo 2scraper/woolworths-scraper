@@ -194,6 +194,76 @@ A single product page is refused with the reason: the same 115-field object
 is already on every listing row, so a product mode would add a mode without
 adding a column.
 
+### Stores
+
+A third mode, and a second row class. It answers "which Woolworths are near
+here", which is the half of *choosing a store* the site lets an anonymous
+caller have — see below for the half it does not.
+
+```bash
+--mode stores --postcode 3000            # 10 stores, nearest first
+--mode stores --suburb "Bondi"           # 10 stores, no distance
+--mode stores --near -37.8136,144.9631   # 30 stores, every one with a distance
+--mode stores --store-id 3304            # one store by its StoreNo
+```
+
+No URL, no key, no account. One lookup per run: the site's four parameter
+sets are not combinable, so passing two is an error rather than a silent
+choice between them.
+
+Each row carries the store number, name, street address, suburb, state,
+postcode, coordinates, distance, phone, trading hours and facilities
+(`Pick up`, `Sushi Bar`, `Quiet Hour: Mon-Thurs 10:30am`…). Measured
+2026-10-08: 10 stores for a bare postcode or suburb, 30 for a coordinate
+query. [`sample_stores.json`](sample_stores.json) and
+[`sample_stores.csv`](sample_stores.csv) are six rows from a real run.
+
+**A distance is null on a suburb lookup**, because the site has no point to
+measure from — 40 of 50 records carried one across three captures and the 10
+without were exactly the suburb query. It is null rather than 0.
+
+**An impossible postcode is refused before the request.** The locator
+answers `9999`, `0000` and `99999` with HTTP 200 and an empty list — the
+same answer a real postcode with no nearby store gets — so without the check
+a typo would read as "Woolworths does not serve that area".
+
+### Choosing which store prices a listing — what the site allows
+
+**It does not, without an account.** Measured 2026-10-08 from a datacentre
+address with no login:
+
+| Request | Answer |
+|---|---|
+| `GET /apis/ui/StoreLocator/Stores?postcode=3000` | 200, 10 stores |
+| `GET /apis/ui/StoreLocator/Store?storeNo=3304` | 200, one store |
+| `GET /apis/ui/Shopper` | 200, `FulfilmentStoreId: 1101`, `IsGuest: true` |
+| `POST /apis/ui/Fulfilment` | **401**, for every body shape tried |
+
+`POST /apis/ui/Fulfilment` is the *only* fulfilment endpoint the front end
+has — checked by pulling every `${baseApisUrl}` fragment out of the site's
+own 5 MB of bundles, 88 of them — and it answers 401 to a guest. **This repo
+does not implement an authenticated session**, so it cannot set one; whether
+an account could is untested.
+
+The listing API ignores a store too, and ignores it *silently*: seven
+spellings (`storeId`, `StoreId`, `fulfilmentStoreId`, `FulfilmentStoreId`,
+`storeNo`, `postcode`, `Postcode`) were added to the category request body
+and every one came back HTTP 200 with the same 37 prices.
+
+So `--postcode` or `--store-id` on a **listing** run does not quietly give
+you the default store's prices under another store's name. It asks the site,
+reads the session's own store before and after, and if nothing changed it
+**refuses with exit 2 and writes nothing**:
+
+```
+The site did not change this session's fulfilment store: it was 1101
+before the request and 1101 after. ... Refusing rather than scraping
+store 1101 and labelling the rows with the store you asked for.
+```
+
+Every listing row already carries the `store_id` that actually priced it, and
+`diff_runs.py` refuses to compare two runs served by different stores.
+
 `woolworths.co.nz` (Woolworths New Zealand, formerly Countdown) and
 `woolworths.co.za` (Woolworths Holdings, South Africa) are **different
 companies on different platforms**, and both are refused by name.

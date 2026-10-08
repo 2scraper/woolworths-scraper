@@ -11,6 +11,8 @@
 # the exact output shape without installing anything.
 !sample_output.json
 !sample_output.csv
+!sample_stores.json
+!sample_stores.csv
 # The offline suite's fixtures. Caught by `*.json` above and therefore NOT
 # committed on the first try — smoke_test.py imports it at module level, so
 # every CI job died with FileNotFoundError while the whole suite was green

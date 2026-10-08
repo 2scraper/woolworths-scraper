@@ -644,8 +644,15 @@ def test_columns_measured_absent_are_absent():
 
 @check
 def test_modes_and_row_classes_agree():
-    assert set(output_writer.ROW_CLASS_BY_MODE) == {"search", "category"}
-    assert set(output_writer.UNIQUE_BY_SKU_MODES) == {"search", "category"}
+    assert set(output_writer.ROW_CLASS_BY_MODE) == {"search", "category",
+                                                    "stores"}
+    assert set(output_writer.UNIQUE_BY_SKU_MODES) == {"search", "category",
+                                                      "stores"}
+    # Two row classes, and the sidecar's `mode` is what tells them apart —
+    # §9 allows the second only with that condition, and `diff_runs`
+    # refuses a pair that does not share one.
+    assert output_writer.ROW_CLASS_BY_MODE["stores"] is output_writer.Store
+    assert output_writer.ROW_CLASS_BY_MODE["search"] is Product
 
 
 @check
@@ -681,6 +688,11 @@ CONTRACT_FLAGS = {
     "--proxy-rotate", "--proxy-shuffle", "--proxy-block-retries",
     "--twocaptcha-key", "--captcha-api", "--solve-captcha", "--min-score",
     "--cdp-endpoint", "--allow-empty", "--dump-html", "--headless",
+    # Choosing a store. All four are in all three engines: the lookup is
+    # engine-independent (it is one GET from inside a loaded page) and the
+    # refusal on a listing run has to be identical everywhere, or one
+    # engine would quietly return another store's prices.
+    "--postcode", "--suburb", "--near", "--store-id",
     "--headful", "--mode",
 }
 # Differences that are DOCUMENTED rather than accidental. This list IS the
@@ -2671,6 +2683,218 @@ def test_diff_runs_refuses_a_file_with_no_sidecar():
     assert "problems.append" in window, (
         "a file with no sidecar still skips every guard in silence")
     assert "continue  # no sidecar" not in body
+
+# ===========================================================================
+# 18. Choosing a store — the half the site permits, and the half it does not
+# ===========================================================================
+# Measured live 2026-10-08. The LOOKUP is open to anyone; SETTING the store
+# that prices a listing answers 401 to a guest. These pin both halves,
+# because the expensive mistake here is not a crash — it is a file whose
+# every cell is real and whose store is wrong.
+
+def _store_fixture(name):
+    payload = FIXTURES[name]
+    return json.loads(payload) if isinstance(payload, str) else payload
+
+
+@check
+def test_stores_parse_from_all_three_real_lookups():
+    for name, how, least in (("stores_postcode", "postcode", 1),
+                             ("stores_suburb", "suburb", 1),
+                             ("stores_latlong", "latlong", 1)):
+        rows = P.stores_from_payload(_store_fixture(name), how=how)
+        assert len(rows) >= least, f"{name}: {len(rows)} rows"
+        first = rows[0]
+        assert first.sku and first.title and first.suburb and first.state
+        assert first.postcode and first.url
+        assert first.data_source == how
+        assert first.position == 1
+        assert first.source == output_writer.SOURCE_DEFAULT
+
+
+@check
+def test_a_suburb_lookup_has_no_distance_and_does_not_fake_one():
+    """40 of 50 store records carried a `Distance`; the 10 without are
+    exactly the suburb query, which has no origin to measure from. An
+    absent distance must not read as a store on the doorstep (§21's "zero
+    is not a rating", wearing different clothes).
+    """
+    near = P.stores_from_payload(_store_fixture("stores_postcode"),
+                                 how="postcode")
+    far = P.stores_from_payload(_store_fixture("stores_suburb"), how="suburb")
+    assert all(r.distance_km is not None for r in near), (
+        "a postcode lookup states a distance for every store")
+    assert all(r.distance_km is None for r in far), (
+        "a suburb lookup has no origin, so distance must be null and never 0")
+
+
+@check
+def test_store_coordinates_are_numbers_not_strings():
+    """The site sends them as strings and every Australian latitude is
+    NEGATIVE — so left as strings, the CSV formula guard apostrophe-
+    prefixes all of them and the column stops being numeric for any
+    mapping tool. Measured on the first live run: 10 of 10 rows escaped.
+    """
+    rows = P.stores_from_payload(_store_fixture("stores_postcode"),
+                                 how="postcode")
+    for r in rows:
+        assert isinstance(r.latitude, float), type(r.latitude)
+        assert isinstance(r.longitude, float), type(r.longitude)
+        assert r.latitude < 0, "Australia is in the southern hemisphere"
+    # And therefore nothing in a store row trips the CSV guard.
+    escaped = 0
+    for r in rows:
+        for v in dataclasses.asdict(r).values():
+            _, was = output_writer._csv_escape(output_writer._csv_value(v))
+            escaped += was
+    assert escaped == 0, f"{escaped} store cell(s) still read as formulas"
+
+
+@check
+def test_the_four_always_null_store_fields_are_not_columns():
+    """§9: a column null on every row of every run costs more than a
+    missing one. `AddressLine2`, `PartnerUrl`, `CategorisedFacilities` and
+    `NearbyPartners` were null on 50 of 50 records across three captures
+    on 2026-10-08. The measurement is written down so someone can put one
+    back with a better one.
+    """
+    names = {f.name for f in dataclasses.fields(output_writer.Store)}
+    for gone in ("address_line2", "partner_url", "categorised_facilities",
+                 "nearby_partners"):
+        assert gone not in names, f"{gone} was measured null on 50 of 50"
+    # and the ones that ARE populated are all there
+    for wanted in ("sku", "title", "address", "suburb", "state", "postcode",
+                   "latitude", "longitude", "phone", "trading_hours",
+                   "facilities"):
+        assert wanted in names, wanted
+
+
+@check
+def test_the_store_row_keeps_the_family_prefix():
+    """§9: a second row class may exist, and then the prefix is a contract."""
+    prod = [f.name for f in dataclasses.fields(Product)][:5]
+    store = [f.name for f in dataclasses.fields(output_writer.Store)][:5]
+    assert prod == store == ["source", "scraped_at", "url", "sku", "title"], (
+        f"{store} does not open the way every row in this family does")
+    assert output_writer.ROW_CLASS_BY_MODE["stores"] is output_writer.Store
+    assert "stores" in output_writer.UNIQUE_BY_SKU_MODES
+
+
+@check
+def test_an_impossible_postcode_is_refused_before_the_request():
+    """The locator answers 9999, 0000 and 99999 with HTTP 200 and an empty
+    list — the SAME answer a real postcode with no nearby store gets. So a
+    typo would read as "Woolworths does not serve that area" unless it is
+    caught first.
+    """
+    assert P.postcode_problem("3000") is None
+    assert P.postcode_problem("0800") is None
+    for bad in ("abc", "99", "300", "30000", "", "3o00", "-300"):
+        assert P.postcode_problem(bad), f"{bad!r} was accepted as a postcode"
+    assert "0200" in P.postcode_problem("0199")
+    # And the empty answer really is indistinguishable in the payload.
+    assert P.stores_from_payload(_store_fixture("stores_none"),
+                                 how="postcode") == []
+
+
+@check
+def test_one_lookup_at_a_time():
+    """The site's four parameter sets are not combinable: a postcode query
+    with a latitude beside it is simply the postcode query, so accepting
+    both would mean silently ignoring one.
+    """
+    ns = argparse.Namespace
+    assert page_flow.store_lookup_problem(
+        ns(postcode=None, suburb=None, near=None, store_id=None))
+    assert page_flow.store_lookup_problem(
+        ns(postcode="3000", suburb=None, near=None, store_id=None)) is None
+    two = page_flow.store_lookup_problem(
+        ns(postcode="3000", suburb="Bondi", near=None, store_id=None))
+    assert two and "ONE lookup" in two
+    # the order the request builder picks, so the help cannot lie about it
+    assert P.store_request_for(store_no="3304")[1] == "store-no"
+    assert P.store_request_for(postcode="3000")[1] == "postcode"
+    assert P.store_request_for(suburb="Bondi")[1] == "suburb"
+    assert P.store_request_for(latitude="-37.8", longitude="144.9")[1] == "latlong"
+
+
+@check
+def test_a_negative_latitude_survives_the_argument_parser():
+    """Every Australian latitude is negative, so `--near -37.8,144.9` is
+    what every user of this flag types — and argparse reads a leading `-`
+    as another option and dies with "expected one argument", which reads
+    like the flag is broken. Measured: it fails on 100% of real Australian
+    coordinates, which is why the tokens are joined before argparse sees
+    them.
+
+    Lives in `page_flow`, not in an engine, so this check needs no driver
+    installed. The first version read it off `PW` and therefore SKIPPED in
+    the bare offline environment — where two planted controls then came
+    back green, which is how it was found (§27.4, met for the third time
+    in one session).
+    """
+    join = page_flow.join_near_argument
+    assert join(["--near", "-37.8136,144.9631"]) == ["--near=-37.8136,144.9631"]
+    assert join(["--near", "-37.8,144.9", "--pages", "2"]) == [
+        "--near=-37.8,144.9", "--pages", "2"]
+    # already joined, or not a coordinate pair: left exactly alone
+    assert join(["--near=-37.8,144.9"]) == ["--near=-37.8,144.9"]
+    assert join(["--near", "Bondi"]) == ["--near", "Bondi"]
+    assert join(["--out", "-weird"]) == ["--out", "-weird"], (
+        "the fix-up must only ever touch --near")
+
+
+@check
+def test_a_store_that_was_not_granted_stops_the_run():
+    """The expensive mistake here is not a crash.
+
+    Accepting `--store-id` and then scraping whatever store the session
+    happens to have, with the requested number stamped on every row,
+    produces a file that is real in every cell and wrong in the one that
+    matters (§8). Measured 2026-10-08: POST /apis/ui/Fulfilment answers
+    401 to a guest and the session's store stays 1101, so this is the
+    live case rather than a hypothetical.
+    """
+    ns = argparse.Namespace(store_id="3304", postcode=None)
+    unchanged = page_flow.store_selection_problem(ns, 1101, 1101)
+    assert unchanged, "a store that did not change was treated as granted"
+    assert "1101" in unchanged
+    assert "does not implement" in unchanged.lower(), (
+        "§19: the sentence must be about what this REPO does, never about "
+        "what is possible")
+    assert "--mode stores" in unchanged, (
+        "a refusal should name the thing that does work")
+    # changed -> no problem
+    assert page_flow.store_selection_problem(ns, 1101, 3304) is None
+
+
+@check
+def test_the_shopper_fixture_states_the_store_and_carries_no_session():
+    """Where `store_id` on a listing row comes from, and §10's scrub."""
+    shopper = _store_fixture("shopper")
+    assert shopper["FulfilmentStoreId"] == 1101
+    assert shopper["IsGuest"] is True, (
+        "the measurement this whole feature rests on is that the session "
+        "is a GUEST")
+    sid = str(shopper.get("SessionId") or "")
+    assert set(sid) <= set("0-"), (
+        f"a real session id reached the fixtures: {sid!r}. Scrub it in "
+        f"make_fixtures.py, and keep the check on the SHAPE so the next "
+        f"capture is caught too")
+
+
+@check
+def test_store_mode_has_its_own_landing_url_and_ignores_pages():
+    """A store lookup is one GET, so there is nothing to paginate — and it
+    still needs a page to be fetched FROM, because the API is asked from
+    inside a loaded page.
+    """
+    for name in ENGINE_NAMES:
+        src = (ROOT / f"{name}.py").read_text(encoding="utf-8")
+        assert "STORE_LANDING_URL" in src, f"{name} has no landing page"
+        assert '"--pages is ignored for a store lookup' in src or \
+               "--pages is ignored for a store lookup" in src, (
+            f"{name} does not say that --pages cannot apply")
 
 def main() -> int:
     total = len(PASSES) + len(FAILURES)

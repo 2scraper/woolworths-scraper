@@ -222,7 +222,10 @@ def build(captures: pathlib.Path) -> dict:
             "rows) but never edited: every value is the site's own. The "
             "group-wrapper shape is preserved deliberately. Advertising "
             "tokens and trolley fields are removed; smoke_test.py checks "
-            "for their SHAPES so a future capture is caught too."),
+            "for their SHAPES so a future capture is caught too. The "
+            "shopper record's SessionId is replaced with an all-zero "
+            "placeholder — it is the one value in these fixtures that is "
+            "not verbatim, and nothing reads it."),
         "api_search": _trim_payload(read_json("api_search.json") or {}),
         "api_category": _trim_payload(read_json("api_category.json") or {}),
         "api_empty": _trim_payload(read_json("api_empty.json") or {}),
@@ -232,6 +235,21 @@ def build(captures: pathlib.Path) -> dict:
         "denial_raw": read_text("denial_raw.html"),
         "served_page": read_text("served.html"),
         "served_cdp_page": read_text("served_cdp.html"),
+        # The store locator, which is the half of "choose a store" that an
+        # anonymous caller is allowed. Three lookups because they do not
+        # answer alike: a postcode and a coordinate query carry a
+        # `Distance` and a suburb query does not, and a fixture that only
+        # had one of them would let an absent distance read as zero.
+        "stores_postcode": _trim_stores(read_json("stores_postcode.json")),
+        "stores_suburb": _trim_stores(read_json("stores_suburb.json")),
+        "stores_latlong": _trim_stores(read_json("stores_latlong.json"), keep=4),
+        # An impossible postcode: HTTP 200 and an empty list, which is the
+        # SAME answer a real postcode with no nearby store gets. The
+        # fixture exists so the check that tells those apart has something
+        # to run against.
+        "stores_none": read_json("stores_none.json") or {"Stores": []},
+        # Who the site thinks we are, and which store is pricing the rows.
+        "shopper": _scrub_shopper(read_json("shopper.json")),
     }
     # The category tree is 2,700 nodes; keep only the top level plus one
     # branch, which is all `category_id_for_slug` needs to be tested on.
@@ -249,6 +267,40 @@ def build(captures: pathlib.Path) -> dict:
             kept.append(slim)
         fixtures["categories_head"] = {"Categories": kept}
     return fixtures
+
+
+# Session material that must not be committed, even anonymous and expired
+# (§10). `SessionId` identifies the browsing session the capture was taken
+# in; nothing in the suite reads its VALUE, only that the field is there
+# and that `FulfilmentStoreId` sits beside it. `smoke_test.py` guards the
+# SHAPE rather than this literal, so the next capture is caught too.
+_SHOPPER_PLACEHOLDER = "00000000-0000-0000-0000-000000000000"
+
+
+def _scrub_shopper(payload):
+    """The shopper record with its session id replaced by an obvious one."""
+    if not isinstance(payload, dict):
+        return {}
+    out = dict(payload)
+    if out.get("SessionId"):
+        out["SessionId"] = _SHOPPER_PLACEHOLDER
+    return out
+
+
+def _trim_stores(payload, keep: int = 3):
+    """A few store records, every field intact.
+
+    Trimmed by COUNT only. Unlike a product, a store record is small and
+    its fields are the point — the four that are always null are dropped
+    by the parser, not here, so the fixture keeps the site's real shape
+    and the parser's decision stays testable.
+    """
+    if not isinstance(payload, dict):
+        return {"Stores": []}
+    stores = payload.get("Stores")
+    if isinstance(stores, list):
+        return {"Stores": stores[:keep]}
+    return payload
 
 
 def main() -> int:

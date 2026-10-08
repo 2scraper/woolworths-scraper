@@ -85,9 +85,9 @@ import json
 import logging
 import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
-from output_writer import CURRENCY_BY_HOST, SOURCE_DEFAULT, Product
+from output_writer import CURRENCY_BY_HOST, SOURCE_DEFAULT, Product, Store
 
 logger = logging.getLogger("product_parser")
 
@@ -127,6 +127,56 @@ API_PRODUCTS_PATH = "/apis/ui/products/"
 # The category tree, which is how an opaque category id is resolved from a
 # URL slug — see `category_id_for_slug`.
 API_CATEGORIES_PATH = "/apis/ui/PiesCategoriesWithSpecials"
+
+# ===========================================================================
+# Stores, and what the site will and will not let an anonymous caller do
+# ===========================================================================
+# Measured live on 2026-10-08, from a datacentre address, no account:
+#
+#   GET  /apis/ui/StoreLocator/Stores?postcode=3000        200, 10 stores
+#   GET  /apis/ui/StoreLocator/Stores?suburb=Bondi         200, 10 stores
+#   GET  /apis/ui/StoreLocator/Stores?latitude=&longitude= 200, 30 stores
+#   GET  /apis/ui/StoreLocator/Stores   (no parameters)    400
+#   GET  /apis/ui/StoreLocator/Stores?searchTerm=2000      400
+#   GET  /apis/ui/StoreLocator/Store?storeNo=3304          200, one store
+#   GET  /apis/ui/Shopper        200, {"FulfilmentStoreId":1101,"IsGuest":true}
+#   POST /apis/ui/Fulfilment     401, 0 bytes, for every body shape tried
+#
+# So the LOOKUP is wide open and the SETTER is not. `POST /apis/ui/Fulfilment`
+# is the only fulfilment endpoint the front end has — checked by extracting
+# every `${baseApisUrl}` fragment out of the site's own 5 MB of bundles, 88
+# of them, and `/Fulfilment` is the only one — and it answers 401 to a guest.
+# Its payload shape is `{fulfilmentMethod, addressId}`, taken from the
+# bundle's own `saveFulfilmentDetails({fulfilmentMethod: Jn, addressId:
+# Zn.pickupStore.AddressId})`; the public store locator returns no
+# `AddressId`, and nothing in that endpoint list returns one either.
+#
+# §19's wording matters here and this is NOT a claim about what is possible:
+# **this repo does not implement an authenticated session**, so it cannot
+# set a fulfilment store. Whether an account could is untested.
+#
+# AND THE LISTING API IGNORES A STORE, SILENTLY. Seven spellings were added
+# to the category request body — storeId, StoreId, fulfilmentStoreId,
+# FulfilmentStoreId, storeNo, postcode, Postcode — and every one came back
+# HTTP 200 with the SAME 37 prices. That is §26's "the API answers wrong
+# values with plausible data": a parameter it does not know is accepted
+# rather than refused, so a scraper that sent one would report another
+# store's prices under that store's name and nothing would look wrong.
+API_STORES_PATH = "/apis/ui/StoreLocator/Stores"
+API_STORE_PATH = "/apis/ui/StoreLocator/Store"
+API_SHOPPER_PATH = "/apis/ui/Shopper"
+API_FULFILMENT_PATH = "/apis/ui/Fulfilment"
+
+# How many stores the locator returns when asked for a lot. The site's own
+# store-locator page sends Max=30 and gets 30; a bare ?postcode= gets 10.
+STORES_MAX = 30
+
+# An Australian postcode is four digits, 0200-9999. Worth checking BEFORE
+# the request, because the locator answers an impossible one with HTTP 200
+# and `{"Stores":[]}` — measured on 9999, 0000 and 99999 — which is
+# indistinguishable from "no store serves this real postcode". Telling a
+# typo from an empty answer is the whole point (§26).
+_POSTCODE_RE = re.compile(r"^[0-9]{4}$")
 
 # What the site's own UI asks for, and therefore what looks ordinary. The
 # API accepts larger values; asking for more than the site does is the kind
@@ -966,6 +1016,142 @@ def category_request_body(category_id: str, slug: str, page: int = 1,
         "categoryVersion": "v2",
     }
 
+
+
+# ===========================================================================
+# Store lookup
+# ===========================================================================
+def postcode_problem(postcode: str) -> Optional[str]:
+    """Why `postcode` is not an Australian postcode, or None if it is.
+
+    Checked before the request rather than after, because the locator
+    answers an impossible postcode with HTTP 200 and an empty list — the
+    same answer a real postcode with no nearby store would get. Without
+    this a typo reads as "Woolworths does not serve that area".
+    """
+    pc = (postcode or "").strip()
+    if not pc:
+        return "no postcode given"
+    if not _POSTCODE_RE.match(pc):
+        return (f"{pc!r} is not an Australian postcode: they are exactly "
+                f"four digits, 0200-9999")
+    if int(pc) < 200:
+        return (f"{pc!r} is below 0200, which is the lowest Australian "
+                f"postcode")
+    return None
+
+
+def store_request_for(*, postcode: Optional[str] = None,
+                      suburb: Optional[str] = None,
+                      latitude: Optional[str] = None,
+                      longitude: Optional[str] = None,
+                      store_no: Optional[str] = None,
+                      limit: int = STORES_MAX) -> Tuple[str, str]:
+    """(path, how) for one store lookup. GET, so there is no body.
+
+    `how` names which of the four lookups was used and goes in the row's
+    `data_source`, so a file says which question produced it.
+
+    Exactly one lookup is used, in this order, because the site's own four
+    parameter sets are not combinable: a `?postcode=` call with a latitude
+    beside it is simply the postcode call.
+    """
+    if store_no:
+        return f"{API_STORE_PATH}?storeNo={quote(str(store_no))}", "store-no"
+    if postcode:
+        return (f"{API_STORES_PATH}?postcode={quote(str(postcode))}",
+                "postcode")
+    if suburb:
+        return f"{API_STORES_PATH}?suburb={quote(str(suburb))}", "suburb"
+    if latitude is not None and longitude is not None:
+        # The parameter set the site's own store-locator page sends.
+        return (f"{API_STORES_PATH}?Max={int(limit)}&Division=SUPERMARKETS"
+                f"&Facility=&latitude={quote(str(latitude))}"
+                f"&longitude={quote(str(longitude))}", "latlong")
+    raise ValueError("a store lookup needs a postcode, a suburb, "
+                     "coordinates or a store number")
+
+
+def _store_rows(payload: Any) -> List[dict]:
+    """The store records in a locator response, whichever shape it is.
+
+    `Stores` for a list query, and a bare object for `?storeNo=` — the
+    single-store endpoint returns the record itself rather than wrapping
+    it, which is the kind of difference that returns zero rows in silence
+    if it is assumed away.
+    """
+    if isinstance(payload, dict):
+        if isinstance(payload.get("Stores"), list):
+            return [s for s in payload["Stores"] if isinstance(s, dict)]
+        if payload.get("StoreNo"):
+            return [payload]
+    return []
+
+
+def store_from_api(node: dict, *, how: str = "", position: Optional[int] = None
+                   ) -> "Store":
+    """One `Store` row from one locator record.
+
+    Everything here is the site's own field, renamed and nothing else —
+    no inference. `Distance` is kept as a NUMBER or left None: the suburb
+    lookup has no origin to measure from and returns null, and a missing
+    distance must not read as a store on the doorstep (§8, and §21's "zero
+    is not a rating" wearing different clothes).
+    """
+    store_no = _text(node.get("StoreNo"))
+    hours = []
+    for h in node.get("TradingHours") or []:
+        if not isinstance(h, dict):
+            continue
+        day, hrs = _text(h.get("Day")), _text(h.get("OpenHour"))
+        if day and hrs:
+            hours.append(f"{day}: {hrs}")
+    facilities = [f for f in (node.get("Facilities") or [])
+                  if isinstance(f, str) and f.strip()]
+    return Store(
+        source=SOURCE_DEFAULT,
+        url=store_url(store_no),
+        sku=store_no,
+        title=_text(node.get("Name")),
+        address=_text(node.get("AddressLine1")),
+        suburb=_text(node.get("Suburb")),
+        state=_text(node.get("State")),
+        postcode=_text(node.get("Postcode")),
+        latitude=_num(node.get("Latitude")),
+        longitude=_num(node.get("Longitude")),
+        distance_km=_num(node.get("Distance")),
+        phone=_text(node.get("Phone")),
+        division=_text(node.get("Division")),
+        gmt_zone=_text(node.get("GMTZone")),
+        is_open_now=(node.get("IsOpen") if isinstance(node.get("IsOpen"), bool)
+                     else None),
+        trading_hours=hours,
+        facilities=facilities,
+        data_source=how or None,
+        position=position,
+    )
+
+
+def stores_from_payload(payload: Any, *, how: str = "") -> List["Store"]:
+    """Every store in a locator response, in the order the site returned it.
+
+    The order IS the answer for a postcode or coordinate lookup — the site
+    sorts by distance — so `position` records it rather than letting a
+    consumer re-sort and lose it.
+    """
+    rows = []
+    for i, node in enumerate(_store_rows(payload), start=1):
+        row = store_from_api(node, how=how, position=i)
+        if row.sku:
+            rows.append(row)
+    return rows
+
+
+def store_url(store_no: Optional[str]) -> Optional[str]:
+    """The store's own page. The site builds it from the number alone."""
+    if not store_no:
+        return None
+    return f"https://{CANONICAL_HOST}/shop/storelocator/{quote(str(store_no))}"
 
 def api_request_for(mode: str, *, term: Optional[str] = None,
                     category_id: Optional[str] = None,

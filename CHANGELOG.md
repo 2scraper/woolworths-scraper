@@ -9,6 +9,80 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
+## [Unreleased]
+
+### Added
+
+- **`--mode stores`: find the Woolworths near a postcode.** A third mode and
+  a second row class, `Store`, with the family prefix byte-identical to
+  `Product`'s. Four lookups, all ungated — no URL, no key, no account:
+
+  ```bash
+  --mode stores --postcode 3000            # 10 stores, nearest first
+  --mode stores --suburb "Bondi"           # 10 stores, no distance
+  --mode stores --near -37.8136,144.9631   # 30 stores, all with a distance
+  --mode stores --store-id 3304            # one store by its StoreNo
+  ```
+
+  Each row carries the store number, name, address, suburb, state, postcode,
+  coordinates, distance, phone, trading hours and facilities. One lookup per
+  run: the site's four parameter sets are not combinable, so two is an error
+  rather than a silent choice between them.
+
+- **`sample_stores.json` / `sample_stores.csv`**, six rows from a real run,
+  and `ci_checks.py --sample-check` now holds BOTH row classes to their
+  dataclass. A repo with two schemas has two to keep honest, and checking
+  only the first is how the other goes stale with nothing failing.
+
+### Changed
+
+- **`--postcode` and `--store-id` on a LISTING run now refuse rather than
+  mislead.** Measured 2026-10-08: `POST /apis/ui/Fulfilment` answers **401**
+  to a guest, and it is the only fulfilment endpoint the front end has —
+  checked by pulling all 88 `${baseApisUrl}` fragments out of the site's own
+  bundles. The listing API ignores a store silently as well: seven spellings
+  of a store parameter were added to the category body and every one came
+  back HTTP 200 with the same 37 prices (§26's "the API answers wrong values
+  with plausible data").
+
+  So the run asks the site, reads the session's own `FulfilmentStoreId`
+  before and after, and if nothing moved it exits **2 and writes nothing** —
+  rather than scraping store 1101 and stamping the requested number on every
+  row, which would be a file that is real in every cell and wrong in the one
+  that matters (§8).
+
+  **This repo does not implement an authenticated session** (§19's wording:
+  a TODO, not a limitation). Whether an account could set a store is
+  untested.
+
+### Fixed
+
+Three things only a live run found, each now pinned by a control:
+
+- **Store coordinates are numbers, not strings.** The site sends them as
+  strings and every Australian latitude is negative, so the CSV formula
+  guard apostrophe-prefixed all of them — 10 of 10 rows on the first live
+  run — and the column stopped being numeric for any mapping tool. The guard
+  was right to escape a formula-shaped string; the fix is for the field not
+  to be one.
+- **`--near -37.8136,144.9631` works.** argparse reads a token beginning
+  with `-` as another option and died with "expected one argument", which
+  reads like the flag is broken. Every Australian latitude is negative, so
+  this failed for **100% of real coordinates**. The two tokens are joined
+  into the `--near=` form before argparse sees them — narrowly, only for
+  `--near` and only when the next token parses as a coordinate pair.
+- **The `shopper` fixture carries no session id.** A real `SessionId` came
+  with the capture; it is replaced with an all-zero placeholder, it is the
+  one value in these fixtures that is not verbatim, and the check guards the
+  SHAPE so the next capture is caught too (§10).
+
+### Note
+
+Four fields the locator returns are deliberately **not** columns:
+`AddressLine2`, `PartnerUrl`, `CategorisedFacilities` and `NearbyPartners`
+were null on 50 of 50 records across three captures. §9 — and the
+measurement is written down so someone can add one back with a better one.
+
 ## [0.3.1] — 2026-10-08
 
 ### Fixed
