@@ -61,7 +61,7 @@ from product_parser import (API_CATEGORIES_PATH, API_CATEGORY_PATH,
                             mode_for_url, organic_count, overlay_dom_prices,
                             products_from_payload, search_term_from_url,
                             source_of, total_count, unsupported_reason)
-from output_writer import dedupe_by_key, finish_run
+from output_writer import dedupe_by_key, finish_run, EXIT_BAD_USAGE
 import page_flow
 from proxy_pool import (from_args as proxy_pool_from_args, split_credentials,
                         mask, ROTATE_MODES, ProxyError)
@@ -74,6 +74,13 @@ logger = logging.getLogger("puppeteer_scraper")
 # One definition each, in page_flow, shared by the three engines (§27.5),
 # with the measurements behind them written down there.
 PageOutcome = page_flow.PageOutcome
+# Where a store lookup lands before asking the locator. Any page the site
+# serves will do — the navigation exists to be issued an Akamai session,
+# not to be read — and the home page is the cheapest one that is always
+# there. Measured: the locator answers from it exactly as it does from a
+# category page.
+STORE_LANDING_URL = "https://www.woolworths.com.au/"
+
 FIELD_FLOOR = page_flow.FIELD_FLOOR
 DOM_CONFIRM_FLOOR = page_flow.DOM_CONFIRM_FLOOR
 _mask_credentials = page_flow.mask_credentials
@@ -667,6 +674,112 @@ def _fetch_one_page(session, args, pool, page_num: int, url=None):
         ops = session._ops = PuppeteerOps(session)
     return page_flow.fetch_one_page(ops, args, pool, page_num, url)
 
+def _honour_store_request(session, args, pool):
+    """Ask for the requested store, or refuse the run. Returns an exit code
+    to return immediately, or None to carry on.
+
+    The refusal is the point. Accepting `--store-id` and then scraping
+    whatever store the session happens to have, with the requested number
+    stamped on every row, would produce a file that is real in every cell
+    and wrong in the one that matters (§8: never present a guess as a
+    fact). So the request is MADE, the session's own store is read before
+    and after, and a run that did not get what it asked for stops.
+    """
+    ops = getattr(session, "_ops", None)
+    if ops is None:
+        ops = session._ops = PuppeteerOps(session)
+
+    landing = page_flow.PageOutcome(page_num=1, url=args.url)
+    html, _status, state = page_flow.land(ops, args, landing)
+    if page_flow.counts_as_blocked(state):
+        logger.error("The landing page was refused, so the store request "
+                     "could not even be made. %s", page_flow.block_advice(
+                         html, headless=bool(getattr(args, "headless", False)),
+                         has_pool=bool(pool and len(pool) > 1)))
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=True,
+            stop_reason="blocked", pages_requested=args.pages,
+            pages_completed=0, start_url=args.url,
+            final_url=ops.current_url() or args.url, mode=args.mode)
+
+    result = page_flow.request_store(ops, args)
+    problem = page_flow.store_selection_problem(
+        args, result["store_before"], result["store_after"])
+    if problem:
+        logger.error("%s", problem)
+        logger.error("       The site answered the store request with "
+                     "HTTP %s.", result.get("store_request_status"))
+        return EXIT_BAD_USAGE
+    logger.info("The site moved this session from store %s to %s.",
+                result["store_before"], result["store_after"])
+    args._store_result = result
+    return None
+
+
+def _run_store_lookup(session, args, pool) -> int:
+    """One store lookup, start to finish. Returns the exit code.
+
+    Kept apart from the listing path on purpose: there is no pagination,
+    no DOM to read, no tiles to wait for and no price to confirm, so
+    routing it through `fetch_one_page` would mean five branches that are
+    False for every store run (§"a branch keyed on a mode that does not
+    exist" — four dead branches per engine is a real cost this family has
+    already paid).
+    """
+    ops = getattr(session, "_ops", None)
+    if ops is None:
+        ops = session._ops = PuppeteerOps(session)
+
+    landing = page_flow.PageOutcome(page_num=1, url=args.url)
+    html, _status, state = page_flow.land(ops, args, landing)
+    if page_flow.counts_as_blocked(state):
+        logger.error("The landing page was refused, so the locator cannot "
+                     "be asked: a store lookup is a request made from "
+                     "inside a loaded page. %s",
+                     page_flow.block_advice(
+                         html, headless=bool(getattr(args, "headless", False)),
+                         has_pool=bool(pool and len(pool) > 1)))
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=True,
+            stop_reason="blocked", pages_requested=1, pages_completed=0,
+            start_url=args.url, final_url=ops.current_url() or args.url,
+            mode="stores", extra=_store_extra(args, None))
+
+    result = page_flow.fetch_stores(ops, args)
+    rows = result.products
+    return finish_run(
+        rows, args.out, args.format, args.allow_empty,
+        blocked=False,
+        stop_reason=("completed" if result.ok else
+                     (result.state or "api_error")),
+        pages_requested=1, pages_completed=1 if result.ok else 0,
+        pages_failed=None if result.ok else [1],
+        start_url=args.url, final_url=result.final_url or args.url,
+        mode="stores", extra=_store_extra(args, rows))
+
+
+def _store_extra(args, rows) -> dict:
+    """What the sidecar records about a store lookup.
+
+    The QUESTION as well as the answer, because two store files are only
+    comparable if they asked the same thing — the same reason `listing`
+    is in a listing run's sidecar.
+    """
+    extra = {
+        "lookup": ("store-no" if args.store_id else
+                   "postcode" if args.postcode else
+                   "suburb" if args.suburb else "latlong"),
+        "postcode": args.postcode,
+        "suburb": args.suburb,
+        "near": args.near,
+        "store_no": args.store_id,
+    }
+    if rows:
+        extra["store_ids"] = sorted({r.sku for r in rows if r.sku})
+        extra["states"] = sorted({r.state for r in rows if r.state})
+    return extra
+
+
 def scrape(args) -> int:
     outcomes: List[PageOutcome] = []
     seen_keys = set()
@@ -690,6 +803,18 @@ def scrape(args) -> int:
 
     bridge = _AsyncBridge()
     session = _Session(bridge, args, pool).open()
+    if args.mode == "stores":
+        try:
+            return _run_store_lookup(session, args, pool)
+        finally:
+            session.close()
+
+    if args.store_id or args.postcode:
+        refused = _honour_store_request(session, args, pool)
+        if refused is not None:
+            session.close()
+            return refused
+
     try:
         first = _fetch_one_page(session, args, pool, 1, args.url)
         outcomes.append(first)
@@ -789,6 +914,8 @@ def scrape(args) -> int:
                                                   if o.dom_confirm), None)})
 
 
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Woolworths Online product scraper (pyppeteer edition)")
@@ -798,7 +925,8 @@ def parse_args():
                         "category (/shop/browse/{slug}, child nodes "
                         "included). Required, unless WOOLWORTHS_URL is set in "
                         "the environment or in .env.")
-    p.add_argument("--mode", choices=["search", "category"], default=None,
+    p.add_argument("--mode", choices=["search", "category", "stores"],
+                   default=None,
                    help="Which view the URL is. Inferred from the URL by "
                         "default; passing one that disagrees is an error.")
     p.add_argument("--category", default=None,
@@ -842,6 +970,36 @@ def parse_args():
                         "and only with a pool). It is a count of RETRIES, "
                         "not of attempts: 4 means up to 5 landings in "
                         "total, and 0 means try once and report it blocked.")
+    # ---- choosing a store ------------------------------------------
+    # What the site permits, measured 2026-10-08: the LOOKUP is open to
+    # anyone and SETTING the store that prices a listing is not. See
+    # `page_flow.store_selection_problem` and product_parser's store
+    # section for the endpoint-by-endpoint table.
+    p.add_argument("--postcode", default=None, metavar="NNNN",
+                   help="Australian postcode, four digits. With --mode "
+                        "stores it lists the stores near it. On a listing "
+                        "run it asks for that store's prices — which an "
+                        "anonymous session cannot have, so the run is "
+                        "REFUSED with the reason rather than quietly "
+                        "returning another store's prices.")
+    p.add_argument("--suburb", default=None, metavar="NAME",
+                   help="Suburb name, for --mode stores. Returns the "
+                        "suburb's stores with no distance, because the "
+                        "site has no point to measure from.")
+    p.add_argument("--near", default=None, metavar="LAT,LONG",
+                   help="Coordinates, for --mode stores — the lookup the "
+                        "site's own store-locator page uses. Returns more "
+                        "stores than a postcode does (30 against 10, "
+                        "measured) and every one with a distance. A "
+                        "southern latitude is negative, so either form "
+                        "works: --near=-37.8136,144.9631 or "
+                        "--near -37.8136,144.9631.")
+    p.add_argument("--store-id", default=None, metavar="N",
+                   help="A Woolworths store NUMBER (StoreNo, e.g. 3304). "
+                        "With --mode stores it fetches that one store. "
+                        "Note it is not the FulfilmentStoreId a listing "
+                        "row carries: the two are different numbering "
+                        "schemes and the row spells out which it is.")
     p.add_argument("--twocaptcha-key", default=None,
                    help="2Captcha API key. Prefer TWOCAPTCHA_KEY in .env.")
     p.add_argument("--captcha-api", choices=["v1", "v2"], default="v2",
@@ -879,11 +1037,64 @@ def parse_args():
     p.add_argument("--headless", dest="headless", action="store_true",
                    help="Run headless. Measured 0/4 served on this site from "
                         "a datacentre address. Expect exit 3.")
-    args = p.parse_args()
+    args = p.parse_args(page_flow.join_near_argument(sys.argv[1:]))
     env_config.apply(args)
-    if not args.url:
+    if not args.url and not (args.mode == "stores" or any(
+            getattr(args, n, None)
+            for n in ("postcode", "suburb", "near", "store_id"))):
+        # A store lookup needs no listing URL — it supplies its own landing
+        # page below — so this is checked after the store branch has had a
+        # chance to claim the run, not before it.
         p.error("no --url given, and WOOLWORTHS_URL is not set in the "
                 "environment or in .env.")
+    # ---- store lookups do not read a listing ---------------------------
+    # A store lookup is a GET against the site's own locator, so there is
+    # no listing URL to validate and none to pass. A page is still needed
+    # to fetch FROM — the API is asked from inside a loaded page, which is
+    # where the Akamai session comes from — so a landing page is supplied
+    # and the user does not have to think about it.
+    _store_lookup = any(getattr(args, n, None)
+                        for n in ("postcode", "suburb", "near", "store_id"))
+    if args.mode == "stores" or (_store_lookup and args.url is None):
+        args.mode = "stores"
+        if args.near:
+            parts = [x.strip() for x in str(args.near).split(",")]
+            if len(parts) != 2 or not all(parts):
+                p.error(f"--near takes LAT,LONG — two numbers separated by "
+                        f"a comma, e.g. --near -37.8136,144.9631. Got "
+                        f"{args.near!r}.")
+            try:
+                float(parts[0]); float(parts[1])
+            except ValueError:
+                p.error(f"--near takes two NUMBERS, got {args.near!r}.")
+            args._near_lat, args._near_long = parts
+        problem = page_flow.store_lookup_problem(args)
+        if problem:
+            p.error(problem)
+        args.url = args.url or STORE_LANDING_URL
+        args.category = args.category or (
+            args.postcode or args.suburb or args.near or args.store_id)
+        args.page_size = PAGE_SIZE
+        if args.pages != 1:
+            logger.info("--pages is ignored for a store lookup: the "
+                        "locator answers in one call and has no pages.")
+            args.pages = 1
+        return args
+    
+    if args.url is None:
+        p.error("--url is required for a listing run. For stores, pass "
+                "--mode stores with --postcode, --suburb, --near or "
+                "--store-id and no URL.")
+    
+    # ---- a store asked for on a LISTING run ----------------------------
+    # Not silently ignored and not silently honoured. The attempt is made
+    # at run time in `scrape`, against the live site, so what the reader
+    # gets is the status the site returned today rather than a sentence
+    # written here months ago (section 13).
+    if args.suburb or args.near:
+        p.error("--suburb and --near only apply to --mode stores. A "
+                "listing is priced by a store, not by an area.")
+
     why = unsupported_reason(args.url)
     if why:
         p.error(why)

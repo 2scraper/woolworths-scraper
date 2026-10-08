@@ -73,14 +73,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
-from product_parser import (API_CATEGORIES_PATH, CONCURRENCY_REASON,
+from product_parser import (API_CATEGORIES_PATH, API_FULFILMENT_PATH,
+                            API_SHOPPER_PATH, CONCURRENCY_REASON,
                             MIN_CARD_MATCHES, PAGE_CAP, PAGE_URL_REASON,
                             SELECTORS, api_request_for, asset_reference_count,
                             category_id_for_slug, category_slug_from_url,
                             detect_block_marker, detect_page_state,
                             is_unauthorised_redirect, iter_category_nodes,
                             organic_count, overlay_dom_prices,
-                            search_term_from_url, total_count)
+                            postcode_problem, search_term_from_url,
+                            store_request_for, stores_from_payload,
+                            total_count)
 
 logger = logging.getLogger("page_flow")
 
@@ -1019,3 +1022,253 @@ def fetch_one_page(ops, args, pool, page_num: int,
     outcome.products = products
     outcome.final_url = ops.current_url()
     return outcome
+
+
+# ===========================================================================
+# Stores: the half of "choose a store" the site actually permits
+# ===========================================================================
+# Measured 2026-10-08 — see `product_parser`'s store section for the full
+# table. The short version:
+#
+#   LOOKUP  wide open. postcode, suburb or coordinates, no account, no key.
+#   SETTING the store that prices a listing: `POST /apis/ui/Fulfilment`
+#           answers 401 to a guest, and it is the only fulfilment endpoint
+#           the front end has.
+#
+# So this module does the lookup properly and, for a listing run, REFUSES to
+# pretend. The alternative — accept `--store-id`, scrape the default store
+# and stamp the requested number on every row — is the exact shape of
+# "never present a guess as a fact" (§8), and it would be invisible: the
+# rows would be real, the prices would be real, and they would belong to a
+# different store than the file says.
+
+
+def fetch_stores(ops, args) -> PageOutcome:
+    """One store lookup. No pagination: the site answers it in one call.
+
+    `--pages` is meaningless here and the engines say so rather than
+    quietly looping; the locator returns everything it is going to return
+    in one response (10 for a bare postcode or suburb, `Max` for a
+    coordinate query, measured 30).
+    """
+    outcome = PageOutcome(page_num=1, url=args.url)
+
+    problem = store_lookup_problem(args)
+    if problem:
+        logger.error("%s", problem)
+        outcome.load_failed = True
+        outcome.state = "rejected"
+        outcome.final_url = ops.current_url() or args.url
+        return outcome
+
+    path, how = store_request_for(
+        postcode=getattr(args, "postcode", None),
+        suburb=getattr(args, "suburb", None),
+        latitude=getattr(args, "_near_lat", None),
+        longitude=getattr(args, "_near_long", None),
+        store_no=getattr(args, "store_id", None))
+
+    status, payload, text = fetch_api_with_retries(ops, args, path, None, 1)
+    if status != 200 or payload is None:
+        logger.error(
+            "GET %s answered HTTP %s with %d byte(s) that %s JSON.",
+            path, status, len(text or ""), "are not" if payload is None else "is")
+        outcome.load_failed = True
+        outcome.state = "api_error"
+        outcome.final_url = ops.current_url()
+        return outcome
+
+    rows = stores_from_payload(payload, how=how)
+    outcome.products = rows
+    outcome.stated_total = len(rows)
+    outcome.state = "content" if rows else "empty"
+
+    if not rows:
+        # An impossible postcode was already refused above, so reaching here
+        # means the site really has nothing. Saying WHICH it is matters:
+        # the locator answers a typo with the same HTTP 200 and the same
+        # empty list (§26), and without the check above a typo would read
+        # as "Woolworths does not serve that area".
+        logger.info(
+            "The store locator returned no store for this %s. The lookup "
+            "itself was well formed — an impossible postcode is refused "
+            "before the request — so this is the site's answer, not a "
+            "typo: exit 4.", how)
+    else:
+        with_distance = sum(1 for r in rows if r.distance_km is not None)
+        logger.info(
+            "%d store(s) from the %s lookup%s. %d carry a distance.",
+            len(rows), how,
+            f", nearest {rows[0].title!r} in {rows[0].suburb}"
+            if rows[0].title else "", with_distance)
+
+    outcome.final_url = ops.current_url()
+    return outcome
+
+
+def store_lookup_problem(args) -> Optional[str]:
+    """Why this store lookup cannot be made, or None.
+
+    Checked BEFORE the request, because the locator answers an impossible
+    postcode with HTTP 200 and `{"Stores": []}` — measured on 9999, 0000
+    and 99999 — which is indistinguishable from a real postcode nobody
+    serves.
+    """
+    given = [n for n in ("postcode", "suburb", "near", "store_id")
+             if getattr(args, n, None)]
+    if not given:
+        return ("--mode stores needs one of --postcode, --suburb, --near "
+                "LAT,LONG or --store-id. The site's locator refuses a "
+                "parameterless query with HTTP 400, so there is no "
+                "'everything' to ask for.")
+    if len(given) > 1:
+        return (f"--mode stores takes ONE lookup and {len(given)} were "
+                f"given ({', '.join('--' + g.replace('_', '-') for g in given)}). "
+                f"The site's four parameter sets are not combinable: a "
+                f"postcode query with a latitude beside it is simply the "
+                f"postcode query, so answering would mean silently "
+                f"ignoring one of them.")
+    if getattr(args, "postcode", None):
+        bad = postcode_problem(args.postcode)
+        if bad:
+            return (f"{bad}. Refused before the request: the locator "
+                    f"answers an impossible postcode with HTTP 200 and an "
+                    f"empty list, which reads exactly like a real postcode "
+                    f"with no store near it.")
+    return None
+
+
+def store_selection_problem(args, served_before, served_after) -> Optional[str]:
+    """Why a requested fulfilment store was not honoured, or None.
+
+    `--store-id`/`--postcode` on a LISTING run asks for prices from a
+    particular store. The attempt is made rather than assumed — the status
+    the site returns today is a fact, and a sentence in this file would be
+    an inheritance (§13) — and if the session's store did not change, the
+    run is refused instead of returning another store's prices under the
+    requested store's name.
+    """
+    if served_before == served_after and served_after is not None:
+        return (
+            f"The site did not change this session's fulfilment store: it "
+            f"was {served_before} before the request and {served_after} "
+            f"after. Measured 2026-10-08, POST /apis/ui/Fulfilment answers "
+            f"HTTP 401 to a guest, and it is the only fulfilment endpoint "
+            f"the front end has — so an anonymous run cannot choose which "
+            f"store prices a listing. THIS REPO DOES NOT IMPLEMENT an "
+            f"authenticated session; whether an account could is untested.\n"
+            f"       Refusing rather than scraping store {served_after} and "
+            f"labelling the rows with the store you asked for.\n"
+            f"       What does work without an account: --mode stores "
+            f"--postcode NNNN lists the stores near a postcode, and every "
+            f"listing row already carries the store_id that priced it.")
+    return None
+
+
+# Every Australian latitude is NEGATIVE, so `--near -37.8,144.9` is the form
+# every user of this flag will type — and argparse reads a token beginning
+# with `-` as another option and dies with "expected one argument", which
+# reads like the flag is broken rather than like a quoting rule. Measured:
+# it fails on 100% of real Australian coordinates.
+#
+# So the two tokens are joined into the `--near=...` form argparse does
+# accept, before it ever sees them. Deliberately narrow: only `--near`, and
+# only when the next token parses as a coordinate pair, so no other
+# negative-looking argument can be swallowed by accident.
+#
+# HERE rather than in the engines for the reason §27.5 gives: it is
+# identical in all three, it needs no driver, and a check that has to
+# import an engine to reach it is a check that goes quiet in exactly the
+# environment where it matters (§27.4). This one is reachable with nothing
+# installed at all.
+_COORD_PAIR_RE = re.compile(r"^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$")
+
+
+def join_near_argument(argv):
+    """`--near -37.8,144.9` -> `--near=-37.8,144.9`. Everything else as-is."""
+    out, i = [], 0
+    while i < len(argv):
+        if (argv[i] == "--near" and i + 1 < len(argv)
+                and _COORD_PAIR_RE.match(argv[i + 1].strip())):
+            out.append(f"--near={argv[i + 1]}")
+            i += 2
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
+
+
+def session_store(ops) -> Optional[int]:
+    """Which fulfilment store is pricing this session, per the site itself.
+
+    `/apis/ui/Shopper` is where the number on every listing row comes from
+    (`FulfilmentStoreId`), so asking it directly is how a run can state the
+    store as a fact about the SESSION rather than inferring it from rows
+    that may be empty.
+    """
+    try:
+        status, payload, _ = ops.fetch_api(API_SHOPPER_PATH, None)
+    except Exception as e:  # noqa: BLE001 — never take a run down for this
+        logger.debug("shopper read failed: %s", e)
+        return None
+    if status != 200 or not isinstance(payload, dict):
+        return None
+    value = payload.get("FulfilmentStoreId")
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def request_store(ops, args) -> dict:
+    """Ask the site to price this listing from a particular store.
+
+    ATTEMPTED, not assumed. What the site answers today is a fact; a
+    sentence written in this file would be an inheritance (§13), and the
+    one thing this family has learned about capability claims is that they
+    rot silently (§19). So the run makes the call, reads the session's
+    store before and after, and reports what actually happened.
+
+    Returns a dict for the sidecar. The caller decides whether to continue.
+    """
+    before = session_store(ops)
+    want = str(args.store_id) if args.store_id else None
+    resolved = None
+
+    if not want and getattr(args, "postcode", None):
+        # A postcode names an area, not a store. The nearest store is the
+        # site's own answer — the locator sorts by distance — so that is
+        # what gets asked for, and the row it came from is recorded.
+        path, _how = store_request_for(postcode=args.postcode)
+        status, payload, _ = ops.fetch_api(path, None)
+        rows = stores_from_payload(payload, how="postcode") if status == 200 else []
+        if not rows:
+            logger.error("No store found near postcode %s, so there is "
+                         "nothing to ask for.", args.postcode)
+            return {"store_requested": None, "store_before": before,
+                    "store_after": before, "store_honoured": False,
+                    "store_request_status": None,
+                    "store_detail": "no store near that postcode"}
+        resolved = rows[0]
+        want = resolved.sku
+        logger.info("Postcode %s resolves to the nearest store: %s (%s, "
+                    "%s %s), %.2f km.", args.postcode, want, resolved.title,
+                    resolved.suburb, resolved.state, resolved.distance_km or 0)
+
+    status = None
+    try:
+        # The payload shape the site's own bundle builds:
+        # saveFulfilmentDetails({fulfilmentMethod, addressId}).
+        status, _payload, _text = ops.fetch_api(
+            API_FULFILMENT_PATH,
+            {"fulfilmentMethod": "Pickup", "addressId": want})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("fulfilment request raised: %s", e)
+
+    after = session_store(ops)
+    honoured = bool(after is not None and before is not None and after != before)
+    return {
+        "store_requested": want,
+        "store_requested_name": getattr(resolved, "title", None),
+        "store_before": before,
+        "store_after": after,
+        "store_honoured": honoured,
+        "store_request_status": status,
+    }

@@ -36,7 +36,8 @@ ENGINE_LIBS = ("playwright", "pyppeteer", "selenium", "webdriver_manager")
 CLIS = ["playwright_scraper.py", "puppeteer_scraper.py", "selenium_scraper.py",
         "fingerprint_client.py", "env_config.py"]
 
-SAMPLE_FILES = ("sample_output.json", "sample_output.csv")
+SAMPLE_FILES = ("sample_output.json", "sample_output.csv",
+                "sample_stores.json", "sample_stores.csv")
 
 # Phrases that show up in hand-written or template sample data. The point of
 # committing a sample is that it came from a real run; a placeholder teaches
@@ -222,10 +223,36 @@ def sample_check():
     if header != expected:
         failed.append("sample_output.csv header differs from output_writer.Product")
 
+    # The SECOND row class gets the same treatment. A repo with two of them
+    # has two schemas to keep honest, and checking only the first is how
+    # the other goes stale without anything failing (§9).
+    from output_writer import Store
+    store_expected = list(asdict(Store()).keys())
+    store_rows = json.loads(
+        (REPO / "sample_stores.json").read_text(encoding="utf-8"))
+    if not store_rows:
+        failed.append("sample_stores.json is empty")
+    else:
+        blob = json.dumps(store_rows).lower()
+        hits = [m for m in FABRICATION_MARKERS if m in blob]
+        if hits:
+            failed.append(f"sample_stores.json looks fabricated: {hits}")
+        for i, row in enumerate(store_rows):
+            if list(row.keys()) != store_expected:
+                failed.append(f"sample_stores.json row {i}: columns differ "
+                              f"from output_writer.Store")
+                break
+        with (REPO / "sample_stores.csv").open(newline="",
+                                               encoding="utf-8") as handle:
+            if next(csv.reader(handle)) != store_expected:
+                failed.append("sample_stores.csv header differs from "
+                              "output_writer.Store")
+
     if not failed:
         discounted = sum(1 for r in rows if r.get("original_price"))
-        print(f"ok       {len(rows)} rows, {len(expected)} columns, "
-              f"{discounted} discounted, schema matches")
+        print(f"ok       {len(rows)} product rows, {len(expected)} columns, "
+              f"{discounted} discounted; {len(store_rows)} store rows, "
+              f"{len(store_expected)} columns; schemas match")
     return failed
 
 

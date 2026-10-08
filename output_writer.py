@@ -266,12 +266,76 @@ class Product:
 
 # Both modes yield the same class: a Woolworths row is a product whichever
 # way it was selected, and the API answers both with the same object.
-ROW_CLASS_BY_MODE = {"search": Product, "category": Product}
+@dataclass
+class Store:
+    """One Woolworths store, from the site's own store locator.
+
+    A SECOND row class rather than columns on `Product`, which the family
+    allows for a repo that genuinely reads more than one kind of thing (§9)
+    — and it comes with that rule's conditions: the family prefix below is
+    byte-identical to `Product`'s and in the same order, `sku` is the id
+    the way it is in every schema here, the sidecar records the `mode`
+    because this repo no longer implies one, and `diff_runs.py` refuses a
+    mode it cannot compare rather than producing a diff of artefacts.
+
+    `sku` is `StoreNo`, the number Woolworths prints on the store page. It
+    is NOT the `FulfilmentStoreId` a listing row carries: the Melbourne QV
+    store is StoreNo 3304 while an anonymous session prices against
+    FulfilmentStoreId 1101. Two numbering schemes, and conflating them is
+    the one mistake this schema exists to make impossible — hence both
+    names are spelled out, here and on `Product.store_id`.
+
+    FOUR FIELDS THE LOCATOR RETURNS ARE NOT HERE. `AddressLine2`,
+    `PartnerUrl`, `CategorisedFacilities` and `NearbyPartners` were null on
+    50 of 50 store records across three captures (a postcode query, a
+    suburb query and a 30-store coordinate query) on 2026-10-08. §9: a
+    column that is null on every row of every run costs more than a missing
+    one. The measurement is written down so the next person can add one
+    back with a better one.
+    """
+    # The family prefix, byte-identical to Product's and in the same order.
+    source: str = SOURCE_DEFAULT
+    scraped_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    url: Optional[str] = None
+    sku: Optional[str] = None            # StoreNo
+    title: Optional[str] = None          # the store's name
+    # Where it is.
+    address: Optional[str] = None
+    suburb: Optional[str] = None
+    state: Optional[str] = None
+    postcode: Optional[str] = None
+    # NUMBERS, though the site sends them as strings. Two reasons and the
+    # second was measured rather than reasoned about: a coordinate is a
+    # number to every consumer that will use it, and every Australian
+    # latitude is NEGATIVE — so left as strings, all 10 of 10 rows in the
+    # first live run had their latitude apostrophe-prefixed by the CSV
+    # formula guard, turning the column into text for any mapping tool.
+    # The guard is right to escape a formula-shaped string; the fix is for
+    # the field not to be one.
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    # How far from what was asked for. None on a suburb lookup, which has
+    # no origin to measure from — 40 of 50 populated, and the 10 absent are
+    # exactly the suburb query. An absent distance must not read as zero.
+    distance_km: Optional[float] = None
+    phone: Optional[str] = None
+    division: Optional[str] = None
+    gmt_zone: Optional[str] = None
+    is_open_now: Optional[bool] = None
+    trading_hours: List[str] = field(default_factory=list)
+    facilities: List[str] = field(default_factory=list)
+    # Provenance: which of the four lookups produced this row.
+    data_source: Optional[str] = None
+    position: Optional[int] = None
+
+
+ROW_CLASS_BY_MODE = {"search": Product, "category": Product,
+                     "stores": Store}
 
 # Modes whose rows are one-per-sku AFTER the dedupe in `save()`, and
 # therefore safe to hand to diff_runs.py. Both qualify — see `is_sponsored`
 # for why the dedupe is not optional here.
-UNIQUE_BY_SKU_MODES = ("search", "category")
+UNIQUE_BY_SKU_MODES = ("search", "category", "stores")
 
 
 def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List[Any]:
@@ -463,6 +527,12 @@ def write_csv(rows: Sequence[Any], path: str, row_cls: Type = Product) -> int:
 
 # Exit code used when a run completes but produced nothing. Distinct from 1
 # (crash) so a caller can tell "ran, found nothing" from "blew up".
+# Bad usage — the family's exit 2. Used here for a run that asked for
+# something the site will not give an anonymous session (a chosen
+# fulfilment store), which is known before anything is scraped, so nothing
+# is fetched and nothing is written.
+EXIT_BAD_USAGE = 2
+
 EXIT_NO_PRODUCTS = 4
 
 # Exit code for a run blocked by a bot-check/challenge page before parsing
