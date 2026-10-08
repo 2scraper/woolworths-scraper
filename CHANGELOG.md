@@ -9,6 +9,97 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
+## [Unreleased]
+
+### Changed
+
+- **One fetch loop instead of three** (CLAUDE.md §27.5). The page loop —
+  landing, block retries, proxy rotation, the solve budget, classification,
+  the readiness wait, target resolution, the API call with its own retry
+  budget, the DOM price confirmation, coverage checks and the
+  empty/parser-failed decision — is now ONE implementation in `page_flow`,
+  and each engine passes an object of 21 named driver operations.
+  `PageOutcome`, `FIELD_FLOOR`, `DOM_CONFIRM_FLOOR` and the credential
+  masker moved there with it.
+
+  Measured before the move: `_fetch_one_page` was 254/213/215 lines in the
+  three engines, 78% textually identical between the two closest, and a
+  code-only diff — comments and log prose stripped — showed **no
+  behavioural difference at all**. Every differing line was driver spelling
+  or a shorter log message in the twins.
+
+  The triplication had already cost this repo twice. v0.1.0 shipped
+  `'Page' object has no attribute 'page'` in category mode on the Playwright
+  engine alone, because one of three copies passed `session.page` where the
+  others passed `session`; search mode never reaches that line, so it got
+  through a search-only verification and reached main. The check written
+  afterwards immediately found a second divergence of the same shape, in
+  `_read_tiles`. §27.5 says to convert the repos where a divergence has
+  actually bitten — this is one, twice.
+
+  Net: the engines lost 1,271 lines of triplicated logic, `page_flow`
+  gained 625 including its comments, and the whole repo is 391 lines
+  shorter. What is still in all three is driver-specific (`_fetch_api`,
+  `_read_tiles`, `_count`, `_proxy_failure`) or legitimately per-engine
+  (`parse_args`' help prose, `scrape`'s launch and teardown).
+  `handle_captcha_if_present` is the next candidate and is deliberately not
+  in this change.
+
+### Fixed
+
+Three divergences the merge exposed, each of which had ONE engine doing it
+right and the other two not:
+
+- **A session refused between pages was read as content.** Two engines
+  returned a hardcoded `"content"` when they were already landed on the
+  URL; the third re-classified the document it found. The third is right —
+  a session can be refused between page 1 and page 2, and the other two
+  would have carried on asking the API from inside a denial page. The
+  shared loop re-classifies.
+- **A dead proxy printed its password, from two engines of three.** The
+  masker was three identical copies and only Selenium actually called it on
+  the load-failure path, so the same unusable exit leaked its credentials
+  from Playwright and pyppeteer. One definition, called in the one place
+  that logs a driver error (§8: an exception message is a log).
+- **`landed_url` existed only once something had assigned it.** No session
+  class declared it; it was created by the first write from outside. It now
+  has a declaration and a comment in all three.
+
+### Added
+
+- **`test_every_engine_provides_every_operation_the_loop_asks_for`** —
+  the required set is derived from `page_flow`'s own AST, never from a list
+  someone keeps up to date, so the day the loop reaches for a new operation
+  every engine missing it fails by name. Instance attributes assigned in
+  `__init__` count, including the tuple form (§26 records the first version
+  of this check elsewhere missing those and reporting false positives).
+
+  It reads the engines **off disk, with no import** — which is the point,
+  and was wrong first time round. Written against the imported modules it
+  skipped for every engine whose driver is absent, so it covered one engine
+  of three locally and **zero in the offline CI job**, where it then failed
+  on its own "nothing was scanned" guard. §27.4 records exactly this trap
+  in exactly this kind of check. The suite now also runs in a bare
+  requirements-only venv locally, which is what CI's offline job is and
+  what would have caught it before the push.
+- **`test_the_shared_loop_runs_end_to_end_against_a_fake_driver`** — six
+  cases through the whole decision tree offline, every answer from a real
+  capture: a served page, the Akamai denial (blocked, retried, screenshot,
+  never parsed), a genuinely empty listing, a payload stating 2,205 results
+  that parses to none, the full block budget being spent, and a session
+  refused between pages. Three copies of the loop could never have shared
+  a test like this, which is half the argument for merging them.
+- **`test_every_ops_method_reaches_a_session_attribute_that_exists`** —
+  written because it happened on the first live run after the merge:
+  `PuppeteerOps.goto` called `self.session.run(...)` where that engine's
+  bridge is `self.session.bridge.run(...)`. The method existed, so the
+  coverage check was happy; the attribute did not, so the engine died with
+  `AttributeError` on its first navigation in both modes. Invisible to
+  import, `--help`, `compileall` and the undefined-name walk; five lines
+  and instant here.
+- **`test_every_engine_drives_the_shared_loop`** — nobody kept a private
+  copy, and the removed helpers stay removed.
+
 ## [0.2.1] — 2026-10-08
 
 ### Fixed

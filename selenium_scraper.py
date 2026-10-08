@@ -81,6 +81,13 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("selenium_scraper")
 
+# One definition each, in page_flow, shared by the three engines (§27.5),
+# with the measurements behind them written down there.
+PageOutcome = page_flow.PageOutcome
+FIELD_FLOOR = page_flow.FIELD_FLOOR
+DOM_CONFIRM_FLOOR = page_flow.DOM_CONFIRM_FLOOR
+_mask_credentials = page_flow.mask_credentials
+
 # Explicit, because a driver that stops answering otherwise hangs the run:
 # "every remote call is bounded" applies to this engine too.
 PAGE_LOAD_TIMEOUT = 60
@@ -89,8 +96,6 @@ SCRIPT_TIMEOUT = 30
 # Kept identical to the Playwright engine's, and the smoke suite asserts it:
 # a floor that differed between engines would mean one of them warning about
 # a page its twin called healthy.
-FIELD_FLOOR = 90
-DOM_CONFIRM_FLOOR = 90
 
 # The one launch flag this site requires. Chrome sets `navigator.webdriver`
 # true under automation, and Woolworths' page script reads it: when it is
@@ -108,16 +113,6 @@ LAUNCH_ARGS = ("--disable-blink-features=AutomationControlled",)
 
 _CREDENTIALS_IN_URL_RE = re.compile(r"([a-z][a-z0-9+.\-]*://)[^\s/@]+:[^\s/@]+@",
                                     re.IGNORECASE)
-
-
-def _mask_credentials(text: str) -> str:
-    """`text` with any username:password in an embedded URL replaced.
-
-    Global, not first-match: an error can repeat an endpoint several times,
-    and a masker that handles one occurrence prints the password for the
-    rest while looking like it works.
-    """
-    return _CREDENTIALS_IN_URL_RE.sub(r"\1***:***@", text or "")
 
 
 def _chrome_ua(version: str) -> str:
@@ -152,49 +147,6 @@ def _cdp_host_port(endpoint: str) -> str:
     return f"{host}{port}"
 
 
-@dataclass
-class PageOutcome:
-    """What one page produced. Mirrors the Playwright engine's field for field."""
-    page_num: int
-    url: str
-    final_url: Optional[str] = None
-    products: List = field(default_factory=list)
-    blocked_by: Optional[str] = None
-    load_failed: bool = False
-    state: Optional[str] = None
-    # What the site says the whole listing holds. NOT stable across pages on
-    # this site (69 on page 1 of one search, 0 on page 50), so it is recorded
-    # beside what the run read and never used as a loop bound.
-    stated_total: Optional[int] = None
-    # None, always: Woolworths numbers no rank on a listing, so there is no
-    # arithmetic gap to compute, and an unknown gap must not read the same as
-    # a gap of zero (§8).
-    gap: Optional[int] = None
-    dom_confirm: Optional[dict] = None
-    api_errors: int = 0
-    unauthorised: bool = False
-
-    # A page whose PARSER produced nothing from a payload the site said
-    # held results. Separate from `load_failed` on purpose: the content
-    # arrived, so this is ours rather than the network's, and the log says
-    # so — but it must not count as a completed page.
-    #
-    # This was the audit's P1 and it is the family defect section 26 records
-    # binance hitting for real. The state was being SET and then discarded:
-    # `ok` consulted only the two fields below, so a parser failure came
-    # back as a page that succeeded with zero rows, which `advance_page`
-    # then read as the end of the listing. A three-page run over a renamed
-    # container reported exit 0, status complete, pagination_exhausted, an
-    # empty `pages_failed`, and page 1's rows — with the parser-failure
-    # ERROR printed two lines above it.
-    parse_failed: bool = False
-
-    @property
-    def ok(self) -> bool:
-        return (not self.load_failed and not self.parse_failed
-                and self.blocked_by is None)
-
-
 class _Session:
     """One Chrome driver, relaunchable onto a different exit.
 
@@ -208,6 +160,12 @@ class _Session:
         self.args, self.pool = args, pool
         self.remote = bool(args.cdp_endpoint)
         self.driver = None
+        # Which URL this session is currently landed on, or None. Declared
+        # here rather than created by the first assignment from outside:
+        # the shared loop reads it through its engine's ops object, and an
+        # attribute that only exists once something has written it is one
+        # rename away from an AttributeError nothing offline can see.
+        self.landed_url = None
 
     def open(self):
         options = Options()
@@ -641,381 +599,108 @@ def handle_captcha_if_present(session, args, allow_solve: bool = True,
     return True
 
 
-def _confirm_with_dom(session, rows, page_num: int) -> Optional[dict]:
-    """Confirm the API's prices against the rendered tiles.
-
-    A CONFIRMATION, never a correction: where the two agree the row's
-    `price_source` becomes `api+dom`, and where they disagree the row is left
-    exactly as the API gave it and a warning names the sku (§4).
-
-    Only for page 1, which is the page the browser is actually looking at —
-    pages 2..N are fetched over the API without navigating.
-    """
-    tiles = _read_tiles(session)
-    if not tiles:
-        logger.info("No rendered tiles were readable on page %d; rows keep "
-                    "price_source='api'.", page_num)
-        return None
-    confirmed, checked = overlay_dom_prices(rows, tiles)
-    share = (100.0 * confirmed / checked) if checked else 0.0
-    logger.info("DOM price confirmation on page %d: %d of %d row(s) checked "
-                "against %d rendered tile(s) agreed (%.0f%%).",
-                page_num, confirmed, checked, len(tiles), share)
-    if checked and share < DOM_CONFIRM_FLOOR:
-        logger.warning(
-            "Only %.0f%% of the rows checked against a rendered tile agreed "
-            "on price, against a measured floor of %d%%. The rows are the "
-            "API's and are unchanged.", share, DOM_CONFIRM_FLOOR)
-    return {"tiles": len(tiles), "checked": checked, "confirmed": confirmed}
-
-
 # Exceptions an API request can raise on this driver.
 API_ERRORS = (WebDriverException,)
 
 
-def _fetch_api_with_retries(session, args, path, body, page_num):
-    """`_fetch_api`, with the user's retry budget spent on it.
+# ===========================================================================
+# The driver primitives the shared loop asks for
+# ===========================================================================
+# `page_flow.fetch_one_page` is ONE implementation for all three engines
+# (§27.5); this class is the only part of it that is Selenium's. Every
+# method is either a driver call or a two-line adapter, and no JavaScript
+# crosses the boundary in either direction — the shared module names the
+# OPERATION and this spells it in Selenium's dialect (§1).
+#
+# `smoke_test.py` derives the required method set from page_flow's own AST
+# rather than from a hand-written list, so the day the loop reaches for a
+# new operation, every engine missing it fails by name.
+class SeleniumOps:
+    """Selenium's half of the page loop."""
 
-    Bounded and backed off, like the navigation retry beside it. The fault
-    this absorbs is real and was measured: a live run hit
-    `TypeError: Failed to fetch` — the request rejected inside Akamai's own
-    hooked `window.fetch` — on page 1, and the same command a minute later
-    returned 153 rows. Retrying the navigation but not the API request left
-    the only call that actually fetches data unprotected.
+    # The exception types the shared loop catches around a driver call.
+    driver_errors = (WebDriverException,)
+    # Named in the one warning about the app bouncing us to
+    # /unauthorisederror, so the reader is told which flag was supposed to
+    # prevent it.
+    launch_arg_hint = LAUNCH_ARGS[0]
 
-    Returns (status, payload, text). A refusal that survives the budget is
-    reported as PARTIAL by the caller, never as the end of the listing.
-    """
-    status = payload = None
-    text = ""
-    for attempt in range(1, max(1, args.retries) + 1):
-        try:
-            status, payload, text = _fetch_api(session, path, body)
-        except API_ERRORS as e:
-            status, payload, text = None, None, ""
-            logger.debug("API request raised: %s", e)
-        if status == 200 and payload is not None:
-            return status, payload, text
-        if attempt < max(1, args.retries):
-            pause = args.retry_delay * (2 ** (attempt - 1))
-            logger.warning(
-                "The API request for page %d did not return usable JSON "
-                "(HTTP %s, %d bytes) — retrying in %.1fs (attempt %d/%d).",
-                page_num, status, len(text or ""), pause, attempt, args.retries)
-            time.sleep(pause)
-    return status, payload, text
+    def __init__(self, session):
+        self.session = session
+        # Cache for the category tree, filled by page_flow.resolve_target.
+        self.category_ids: dict = {}
 
-def _land(session, args, outcome):
-    """Make sure the driver is ON the listing page. (html, status, state)
+    def is_live(self) -> bool:
+        return getattr(self.session, "driver", None) is not None
 
-    Navigates only when it has to. Every page of a listing is fetched from
-    inside ONE loaded page — the navigation exists to make Akamai issue a
-    session, not to reach page N.
+    def is_landed(self, url: str) -> bool:
+        return getattr(self.session, "landed_url", None) == url
 
-    Selenium reports no HTTP status, so `status` is always None here and
-    `detect_page_state` falls through to the markers and the asset-host
-    signal. That is the one place this engine has strictly less information
-    than its twins, and it is why the positive asset-host check matters so
-    much on this site: it answers correctly with no status at all (§8).
-    """
-    if getattr(session, "landed_url", None) == args.url:
-        html = _content(session)
-        if html:
-            return html, None, _classify(session, html, None)
-        session.landed_url = None
+    def set_landed(self, url: str) -> None:
+        self.session.landed_url = url
 
-    for attempt in range(1, args.retries + 1):
-        try:
-            session.driver.get(args.url)
-            break
-        except WebDriverException as e:
-            reason = _proxy_failure(e)
-            if reason:
-                logger.error("Exit failed: %s", reason)
-                outcome.load_failed = True
-                return None, None, "blocked"
-            if attempt < args.retries:
-                pause = args.retry_delay * (2 ** (attempt - 1))
-                logger.warning("Could not load %s (attempt %d/%d: %s) — "
-                               "retrying in %.1fs.", args.url, attempt,
-                               args.retries, _mask_credentials(str(e))[:140],
-                               pause)
-                time.sleep(pause)
-            else:
-                outcome.load_failed = True
-                return None, None, "blocked"
+    def clear_landing(self) -> None:
+        self.session.landed_url = None
 
-    html = _content(session) or ""
-    state = _classify(session, html, None)
-    if state != "blocked":
-        session.landed_url = args.url
-    return html, None, state
+    def current_url(self):
+        return _current_url(self.session)
 
+    def goto(self, url: str, timeout_ms: int):
+        # Selenium reports no HTTP status at all, so this returns None and
+        # `detect_page_state` falls through to the markers and the
+        # asset-host signal. That is the one place this engine has strictly
+        # less information than its twins, and it is why the positive
+        # asset-host check matters so much on this site: it answers
+        # correctly with no status (§8). `timeout_ms` is set on the driver
+        # at launch, which is where Selenium takes it.
+        self.session.driver.get(url)
+        return None
 
-def _resolve_target(session, args, outcome):
-    """What to ask the API for. (ok, term, category_id, slug)
+    def document_text(self):
+        return _content(self.session)
 
-    A category id is OPAQUE: `bakery` is `1_DEB537E`. Sending the slug
-    instead returns 200 with zero products and `Success: true`, which reads
-    exactly like a real empty category — so an unresolved slug is refused
-    here rather than turned into a run that reports success on nothing.
+    def classify(self, html, status=None) -> str:
+        return _classify(self.session, html or "", status)
 
-    Cached on the session: the tree is ~2,700 nodes and does not change
-    between pages of one run.
-    """
-    if args.mode == "search":
-        term = search_term_from_url(args.url)
-        if not term:
-            logger.error("No searchTerm parameter in %s.", args.url)
-            outcome.load_failed = True
-            return False, None, None, None
-        return True, term, None, None
+    def count(self, selector: str) -> int:
+        return _count(self.session, selector)
 
-    slug = category_slug_from_url(args.url)
-    cached = getattr(session, "category_ids", None)
-    if cached is None:
-        cached = session.category_ids = {}
-    if slug in cached:
-        return True, None, cached[slug], slug
+    def wait_ms(self, ms: int) -> None:
+        _sleep(ms)
 
-    status, tree, _ = _fetch_api(session, API_CATEGORIES_PATH, None)
-    if status != 200 or not tree:
-        logger.error("Could not read the category tree (%s %s). Without it a "
-                     "slug cannot be turned into the opaque id the browse API "
-                     "needs.", API_CATEGORIES_PATH, status)
-        outcome.load_failed = True
-        return False, None, None, None
+    def screenshot(self, path: str) -> None:
+        self.session.driver.save_screenshot(path)
 
-    node_id = category_id_for_slug(tree, slug or "")
-    if not node_id:
-        logger.error(
-            "%r is not a category node on this site. It is not a typo in the "
-            "code: the slug was looked up in Woolworths' own tree (%s, %d "
-            "nodes) and is not in it. Check the URL in a browser.",
-            slug, API_CATEGORIES_PATH,
-            sum(1 for _ in iter_category_nodes(tree)))
-        outcome.load_failed = True
-        return False, None, None, None
+    def read_tiles(self):
+        return _read_tiles(self.session)
 
-    cached[slug] = node_id
-    logger.info("Category %r resolves to node id %s.", slug, node_id)
-    return True, None, node_id, slug
+    def fetch_api(self, path: str, body=None):
+        return _fetch_api(self.session, path, body)
+
+    def api_error_count(self) -> int:
+        return _api_error_count(self.session)
+
+    def rows_from_payload(self, payload, args, page_num: int, data_source):
+        return _rows_from_payload(payload, args, page_num, data_source)
+
+    def proxy_failure(self, exc):
+        return _proxy_failure(exc)
+
+    def relaunch(self) -> None:
+        self.session.relaunch()
+
+    def handle_captcha(self, args, allow_solve: bool, budget) -> bool:
+        return handle_captcha_if_present(self.session, args,
+                                         allow_solve=allow_solve,
+                                         budget=budget)
 
 
-def _fetch_one_page(session, args, pool, page_num: int,
-                    url=None) -> PageOutcome:
-    """Fetch one page of the listing and parse it.
-
-    `url` is accepted for the family's signature and is the LISTING's
-    address, the same for every page: a page is a number in a request body,
-    not an address.
-    """
-    outcome = PageOutcome(page_num=page_num, url=url or args.url)
-    has_pool = bool(pool and len(pool) > 1)
-    block_retries = page_flow.block_retries(
-        has_pool, getattr(args, "proxy_block_retries", None))
-
-    html = state = None
-    # Per PAGE, not per attempt: the whole point is that retrying
-    # the same page does not buy a second solve for it.
-    solve_budget = page_flow.SolveBudget()
-
-    for block_attempt in range(block_retries + 1):
-        outcome.load_failed = False
-        html, status, state = _land(session, args, outcome)
-        # The POLICY decides whether another fetch could change this
-        # answer, rather than each engine deciding for itself (section 1).
-        if not page_flow.should_retry(state) and not outcome.load_failed:
-            break
-        if block_attempt < block_retries:
-            if pool and page_flow.RETRY_NEEDS_FRESH_CONTEXT:
-                try:
-                    # `advance()`, not `rotate()`: ProxyPool stores the
-                    # rotation MODE as `self.rotate`, so `pool.rotate()`
-                    # is a string and calling it raised TypeError — a
-                    # crash (exit 1) on every rotation, in all three
-                    # engines, on the one path a pool exists for.
-                    pool.advance("refused by the site")
-                except ProxyError as e:
-                    logger.warning("Could not rotate the exit: %s", e)
-            session.landed_url = None
-            logger.warning("Refused (attempt %d of %d) — relaunching%s.",
-                           block_attempt + 1, block_retries + 1,
-                           " on the next exit" if has_pool else "")
-            try:
-                session.relaunch()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("Relaunch failed: %s", e)
-            time.sleep(args.retry_delay)
-
-    # Detection runs on every page, whatever the state (section 8);
-    # whether a SOLVE may be bought is page_flow's call.
-    try:
-        if args.solve_captcha != "never":
-            if handle_captcha_if_present(session, args,
-                                         allow_solve=page_flow.should_solve(state),
-                                         budget=solve_budget):
-                html = _content(session) or html
-                state = _classify(session, html, None)
-    except WebDriverException as e:
-        logger.debug("captcha check skipped: %s", e)
-
-    outcome.state = state
-
-    if outcome.load_failed and state != "blocked":
-        outcome.final_url = _current_url(session) or args.url
-        return outcome
-
-    if page_flow.counts_as_blocked(state):
-        debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        try:
-            session.driver.save_screenshot(f"{args.out}_page{page_num}_debug.png")
-        except WebDriverException as e:
-            logger.warning("Could not capture screenshot: %s", e)
-        logger.error(
-            "The site did not serve this request — %d bytes, %d reference(s) "
-            "to the site's own asset host, saved to %s. This is exit 3, "
-            "distinct from a genuinely empty result (exit 4).",
-            len(html or ""), asset_reference_count(html or ""), debug_html)
-        logger.error("%s", page_flow.block_advice(
-            html, headless=bool(getattr(args, "headless", False)),
-            has_pool=has_pool))
-        outcome.blocked_by = (detect_block_marker(html or "")
-                              or ("no-response" if not html else "akamai"))
-        outcome.final_url = _current_url(session) or args.url
-        return outcome
-
-    if page_num == 1:
-        found = page_flow.wait_for_tiles(
-            lambda sel: _count(session, sel), _sleep,
-            page_flow.ready_selector(args.mode), _min_matches(args, html))
-        logger.info("%d tile(s) had painted when the API was asked.", found)
-        if is_unauthorised_redirect(_current_url(session)):
-            outcome.unauthorised = True
-            logger.warning(
-                "The app navigated itself to %s — it has decided this "
-                "browser is automated, and the product grid will not render. "
-                "The rows below still come from the site's own API and are "
-                "correct, but the DOM price cross-check is impossible. This "
-                "engine passes %s to prevent it.",
-                _current_url(session), LAUNCH_ARGS[0])
-
-    ok, term, category_id, slug = _resolve_target(session, args, outcome)
-    if not ok:
-        outcome.final_url = _current_url(session) or args.url
-        return outcome
-
-    path, body, data_source = api_request_for(
-        args.mode, term=term, category_id=category_id, slug=slug,
-        page=page_num, page_size=args.page_size)
-
-    errors_before = _api_error_count(session)
-    status, payload, text = _fetch_api_with_retries(
-        session, args, path, body, page_num)
-
-    if status != 200 or payload is None:
-        logger.error(
-            "POST %s for page %d answered HTTP %s with %d byte(s) that %s "
-            "JSON. This is not the end of the listing — the run is reported "
-            "as PARTIAL (exit 6) rather than complete. Raise --delay (it is "
-            "%.1fs now), or spread the load with --proxy-file.",
-            path, page_num, status, len(text or ""),
-            "are not" if payload is None else "is", args.delay)
-        outcome.load_failed = True
-        outcome.state = "api_error"
-        outcome.final_url = _current_url(session)
-        return outcome
-
-    if args.dump_html:
-        base = (args.dump_html if args.pages == 1
-                else f"{args.dump_html}.page{page_num}")
-        with open(base, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        with open(f"{base}.api.json", "w", encoding="utf-8") as f:
-            f.write(text or "")
-        logger.info("Saved the document to %s (%d bytes) and the payload the "
-                    "parser actually reads to %s.api.json (%d bytes).",
-                    base, len(html or ""), base, len(text or ""))
-
-    products = _rows_from_payload(payload, args, page_num, data_source)
-    stated = total_count(payload)
-    organic = organic_count(products)
-    logger.info("Parsed %d row(s) from page %d — %d organic, %d promoted.%s",
-                len(products), page_num, organic, len(products) - organic,
-                f" The site states {stated} result(s) for this listing."
-                if stated is not None else "")
-
-    outcome.stated_total = stated
-    outcome.api_errors = _api_error_count(session) - errors_before
-
-    if products and page_num == 1:
-        outcome.dom_confirm = _confirm_with_dom(session, products, page_num)
-
-    if products:
-        # Counted over the rows that CAN carry a price. Woolworths publishes
-        # none for a product it is not selling: on one fruit-veg page 6 of 73
-        # rows had no price and every one of the 6 was `IsAvailable: false`,
-        # while 67 of the 67 available rows had one. Counting those 6 against
-        # the floor printed a warning about a completely correct read, and a
-        # warning that fires when nothing is wrong teaches people to ignore
-        # warnings.
-        sellable = [p for p in products if p.is_available is not False]
-        with_title = sum(1 for p in products if p.title)
-        with_price = sum(1 for p in sellable if p.price is not None)
-        title_share = 100.0 * with_title / len(products)
-        price_share = (100.0 * with_price / len(sellable)) if sellable else 100.0
-        share = min(title_share, price_share)
-        logger.info("Coverage on page %d: title %d/%d, price %d/%d of the "
-                    "sellable rows (%.0f%% at worst); the measured floor is "
-                    "%d%%.%s", page_num, with_title, len(products),
-                    with_price, len(sellable), share, FIELD_FLOOR,
-                    f" {len(products) - len(sellable)} row(s) are "
-                    f"unavailable and carry no price by design."
-                    if len(sellable) != len(products) else "")
-        if share < FIELD_FLOOR:
-            logger.warning(
-                "Only %.0f%% of page %d carries both a title and a price, "
-                "against a measured floor of %d%%. Re-run with --dump-html "
-                "and look at the .api.json.", share, page_num, FIELD_FLOOR)
-    elif stated == 0:
-        # A genuinely empty listing, and the site says so itself. NOT a
-        # parser problem, and saying so matters: the two want different
-        # readers doing different things (section 20). The run still reports
-        # exit 4 — the catalogue question was answered and the answer was
-        # nothing — but nothing is dumped and nobody is sent to debug a read
-        # that worked.
-        logger.info(
-            "The site reports 0 results for this listing, and 0 rows were "
-            "parsed. That is a correct, empty answer rather than a failed "
-            "read — exit 4.")
-        outcome.state = "empty"
-    else:
-        # The site said it HAS results and the parser produced none. That is
-        # ours, and it is the case section 20 asks to be named rather than
-        # reported as "0 products", which sends the reader to check the URL
-        # instead of the payload.
-        debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
-            f.write(html or "")
-        with open(f"{debug_html}.api.json", "w", encoding="utf-8") as f:
-            f.write(text or "")
-        outcome.state = "parse_failed"
-        outcome.parse_failed = True
-        logger.error(
-            "The site states %s result(s) for this listing and the parser "
-            "produced NONE. That is a parser failure, not an empty "
-            "category. Saved the document to %s and the payload to "
-            "%s.api.json — the likeliest cause is that the group wrapper "
-            "shape changed, so check whether `Products`/`Bundles` still "
-            "holds one level of wrapper objects.",
-            stated, debug_html, debug_html)
-
-    outcome.products = products
-    outcome.final_url = _current_url(session)
-    return outcome
-
+def _fetch_one_page(session, args, pool, page_num: int, url=None):
+    """Thin wrapper over the shared loop, kept for the family's signature."""
+    ops = getattr(session, "_ops", None)
+    if ops is None:
+        ops = session._ops = SeleniumOps(session)
+    return page_flow.fetch_one_page(ops, args, pool, page_num, url)
 
 def scrape(args) -> int:
     outcomes: List[PageOutcome] = []

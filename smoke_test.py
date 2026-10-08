@@ -823,17 +823,37 @@ def test_engines_import_their_driver_at_module_level():
 
 @check
 def test_no_policy_constant_is_without_a_consumer():
-    """§17: a policy constant nothing reads is the same defect as dead code."""
-    engine_src = "\n".join((ROOT / f"{n}.py").read_text(encoding="utf-8")
-                           for n in ENGINE_NAMES)
+    """§17: a policy constant nothing reads is the same defect as dead code.
+
+    The consumer may be an engine OR the shared page loop, which is the
+    same thing one step removed: every engine calls
+    `page_flow.fetch_one_page`, so a constant that loop reads is a constant
+    all three engines read. Before §27.5 the loop lived in the engines and
+    this check only looked there; after it, looking only there would fail
+    on constants that are MORE consumed than before, not less.
+
+    The pairing is what keeps it honest: a constant must have a reader, and
+    the shared loop must itself be reached from every engine — asserted by
+    `test_every_engine_drives_the_shared_loop` below. Without that second
+    half this would pass for a constant read by a page_flow function
+    nobody calls, which is the dead code it exists to find.
+    """
+    consumers = "\n".join((ROOT / f"{n}.py").read_text(encoding="utf-8")
+                          for n in ENGINE_NAMES)
+    flow = (ROOT / "page_flow.py").read_text(encoding="utf-8")
+    # Only the part of page_flow BELOW the loop's own banner counts: a
+    # definition is not a consumer of itself.
+    marker = "# The page loop itself"
+    assert marker in flow, "the shared-loop section was renamed"
+    consumers += "\n" + flow.split(marker, 1)[1]
     for name in ("should_retry", "should_solve", "counts_as_blocked",
                  "block_retries", "advance_page", "wait_for_tiles",
                  "organic_count", "RETRY_NEEDS_FRESH_CONTEXT", "ADS_ONLY",
                  "page_cap_reached", "block_advice", "classify",
                  "ready_selector", "min_matches"):
-        assert name in engine_src, (
-            f"page_flow.{name} has no consumer in any engine — either use it "
-            "or delete it")
+        assert name in consumers, (
+            f"page_flow.{name} has no consumer in any engine or in the "
+            "shared loop — either use it or delete it")
 
 
 @check
@@ -870,6 +890,11 @@ def test_the_engines_call_their_shared_helpers_the_same_way():
                     and node.args):
                 continue
             first = ast.unparse(node.args[0])
+            # An ops method holds the session on `self`, so `self.session`
+            # and `session` are the same argument reached two ways. The
+            # check is about WHICH THING is passed, not about how the
+            # caller happens to hold it.
+            first = first.replace("self.session", "session")
             seen[node.func.id].setdefault(name, set()).add(first)
 
     problems = []
@@ -1235,10 +1260,17 @@ def test_proxy_block_retries_reaches_the_policy():
     assert page_flow.block_retries(False, 7) == page_flow.BLOCK_RETRIES_WITHOUT_POOL, (
         "without a pool there is nothing to rotate to, so the flag does not "
         "apply and the constant is the re-fetch budget")
+    # Read in the SHARED loop since §27.5, which is how all three engines
+    # read it. Asserted there rather than per engine, and the engines are
+    # asserted not to have grown a second copy.
+    flow = (ROOT / "page_flow.py").read_text(encoding="utf-8")
+    assert "proxy_block_retries" in flow, (
+        "the shared loop never passes the flag into the policy")
     for name in ENGINE_NAMES:
         src = (ROOT / f"{name}.py").read_text(encoding="utf-8")
-        assert "proxy_block_retries" in src.split("def parse_args")[0], (
-            f"{name} never passes the flag into the policy")
+        assert "block_retries(" not in src, (
+            f"{name} computes its own block-retry budget again — that is "
+            f"the triplication §27.5 removed, growing back")
 
 
 @check
@@ -1264,7 +1296,9 @@ def test_the_pool_is_advanced_by_a_method_that_exists():
     # Checked on the AST, not on the text. The first version grepped the
     # source and failed on the COMMENT that explains the bug — section 22's
     # "a note about a banned phrase is a use of it", met immediately.
-    for name in ENGINE_NAMES:
+    # In the SHARED loop since §27.5 — one call site for three engines,
+    # which is the point: this bug was three copies of one mistake.
+    for name in ("page_flow",) + ENGINE_NAMES:
         tree = ast.parse((ROOT / f"{name}.py").read_text(encoding="utf-8"))
         called = {}
         for node in ast.walk(tree):
@@ -1275,8 +1309,14 @@ def test_the_pool_is_advanced_by_a_method_that_exists():
                 called[node.func.attr] = len(node.args)
         assert "rotate" not in called, (
             f"{name} calls pool.rotate(), which is the mode string")
-        assert called.get("advance") == 1, (
-            f"{name} must call pool.advance(reason); saw {called}")
+        if name == "page_flow":
+            assert called.get("advance") == 1, (
+                f"the shared loop must call pool.advance(reason); saw {called}")
+        else:
+            assert "advance" not in called, (
+                f"{name} rotates the pool itself again — the shared loop "
+                f"owns that, and two rotations per refusal is what three "
+                f"copies of this code used to risk")
 
 
 @check
@@ -2171,19 +2211,34 @@ def test_every_engine_passes_the_budget_to_every_captcha_call():
                 f"takes: the cap then describes the other one")
             scanned += 1
     assert scanned >= 3, f"only {scanned} call site(s) scanned"
+    # And the shared loop, which is what each of those ops methods is
+    # called FROM, passes the page's budget rather than minting one.
+    flow = ast.parse((ROOT / "page_flow.py").read_text(encoding="utf-8"))
+    hc = [n for n in ast.walk(flow)
+          if isinstance(n, ast.Call)
+          and getattr(n.func, "attr", None) == "handle_captcha"]
+    assert len(hc) == 1, f"expected one captcha call in the loop, got {len(hc)}"
+    assert {k.arg for k in hc[0].keywords} >= {"allow_solve", "budget"}
 
 
 @check
 def test_the_budget_is_created_per_page_not_per_attempt():
-    """Outside the block-retry loop, or retrying buys another solve."""
-    for name in ("playwright_scraper.py", "selenium_scraper.py",
-                 "puppeteer_scraper.py"):
-        src = (ROOT / name).read_text(encoding="utf-8")
-        made = src.index("solve_budget = page_flow.SolveBudget()")
-        loop = src.index("for block_attempt in range(block_retries + 1):")
-        assert made < loop, (
-            f"{name}: the budget is built inside the retry loop, so every "
-            f"attempt gets a fresh one and the cap means nothing")
+    """Outside the block-retry loop, or retrying buys another solve.
+
+    In the shared loop since §27.5, so this is one assertion rather than
+    three — and the engines are asserted not to have grown their own.
+    """
+    src = (ROOT / "page_flow.py").read_text(encoding="utf-8")
+    made = src.index("solve_budget = SolveBudget()")
+    loop = src.index("for block_attempt in range(block_retries_left + 1):")
+    assert made < loop, (
+        "the budget is built inside the retry loop, so every attempt gets "
+        "a fresh one and the cap means nothing")
+    for name in ENGINE_NAMES:
+        assert "SolveBudget()" not in (ROOT / f"{name}.py").read_text(
+            encoding="utf-8"), (
+            f"{name} builds its own solve budget again — the shared loop "
+            f"owns it, and two budgets is no budget")
 
 
 @check
@@ -2250,6 +2305,332 @@ def test_a_retried_page_buys_only_one_solve():
         f"{attempts} attempts at one page bought {len(bought)} solve(s) "
         f"against SOLVES_PER_PAGE={page_flow.SOLVES_PER_PAGE}")
     assert budget.spent == page_flow.SOLVES_PER_PAGE
+
+# ===========================================================================
+# 17. One fetch loop, three drivers (§27.5)
+# ===========================================================================
+# The two checks §26 says to ship WITH this pattern, because the pattern is
+# only safe if they exist: derive the operation set from the loop's own AST
+# so a hand-written list cannot drift, and drive the whole loop offline with
+# a fake driver answering from real fixtures.
+
+def _required_ops():
+    """Every `ops.<name>` the shared loop reaches for, read off its AST.
+
+    A hand-written list would drift the day the loop uses a new one, which
+    is the whole reason §26 specifies deriving it. Mind tuple targets
+    (`self.a, self.b = ...`): §26 records the first version of this check
+    missing them and reporting three false positives.
+    """
+    tree = ast.parse((ROOT / "page_flow.py").read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "ops"):
+            names.add(node.attr)
+    return names
+
+
+def _ops_class_node(engine_name):
+    """The engine's `*Ops` class, read off disk. NO import."""
+    tree = ast.parse((ROOT / f"{engine_name}.py").read_text(encoding="utf-8"))
+    for n in tree.body:
+        if isinstance(n, ast.ClassDef) and n.name.endswith("Ops"):
+            return n
+    return None
+
+
+def _provided(cls_node):
+    """Methods and class attributes, PLUS whatever __init__ assigns to self."""
+    names = set()
+    for m in cls_node.body:
+        if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(m.name)
+        elif isinstance(m, ast.Assign):
+            for t in m.targets:
+                if isinstance(t, ast.Name):
+                    names.add(t.id)
+        elif isinstance(m, ast.AnnAssign) and isinstance(m.target, ast.Name):
+            names.add(m.target.id)
+    for node in ast.walk(cls_node):
+        # `self.x = ...` and `self.x, self.y = ...` — the tuple form is the
+        # one §26 records the first version of this check missing.
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign)
+                   else [])
+        for t in targets:
+            for part in (t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]):
+                if (isinstance(part, ast.Attribute)
+                        and isinstance(part.value, ast.Name)
+                        and part.value.id == "self"):
+                    names.add(part.attr)
+    return names
+
+
+@check
+def test_every_engine_provides_every_operation_the_loop_asks_for():
+    """Derived from the loop, never from a list someone keeps up to date.
+
+    Read off DISK, with no engine import — which is the whole point and was
+    wrong in the first version. Written against the imported modules, this
+    skipped for every engine whose driver is absent, so it covered one
+    engine of three locally and ZERO in the offline CI job, where it then
+    failed on its own "nothing was scanned" guard. CLAUDE.md §27.4 records
+    exactly this trap in exactly this kind of check: a guard gated behind
+    the import is a guard that is quietest where it is needed most. It
+    needs no import, so it has none, and it now covers all three engines in
+    every environment.
+    """
+    need = _required_ops()
+    assert len(need) >= 15, (
+        f"only {len(need)} operations derived — the loop stopped going "
+        f"through `ops`, or this check stopped finding it")
+    checked = 0
+    for name in ENGINE_NAMES:
+        node = _ops_class_node(name)
+        assert node is not None, f"{name} has no *Ops class"
+        missing = sorted(need - _provided(node))
+        assert not missing, (
+            f"{name}.{node.name} is missing {missing}. The shared loop "
+            f"calls every one of these, so this engine would die on the "
+            f"page it first reaches — which is exactly the divergence "
+            f"§27.5 removed the triplication to prevent")
+        checked += 1
+    assert checked == len(ENGINE_NAMES), (
+        f"only {checked} of {len(ENGINE_NAMES)} engines were scanned")
+
+
+@check
+def test_every_engine_drives_the_shared_loop():
+    """Nobody kept a private copy of the loop.
+
+    The pairing half of `test_no_policy_constant_is_without_a_consumer`:
+    that one accepts page_flow's loop as a consumer, which is only sound
+    if every engine actually reaches it.
+    """
+    for name in ENGINE_NAMES:
+        tree = ast.parse((ROOT / f"{name}.py").read_text(encoding="utf-8"))
+        calls = {ast.unparse(n.func) for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)}
+        assert "page_flow.fetch_one_page" in calls, (
+            f"{name} does not call the shared loop")
+        # And it has no loop of its own left behind.
+        defs = {n.name for n in tree.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for gone in ("_land", "_resolve_target", "_fetch_api_with_retries",
+                     "_confirm_with_dom"):
+            assert gone not in defs, (
+                f"{name} still defines {gone}() — the shared loop owns it, "
+                f"and two copies is how they drift")
+
+
+@check
+def test_the_shared_loop_runs_end_to_end_against_a_fake_driver():
+    """§26's second check: drive the WHOLE decision tree offline.
+
+    Three copies of this loop could never share a test like this, which is
+    half the argument for merging them. Every answer below comes from a
+    real capture in `fixtures_generated.json`, so the payload shapes are
+    the site's rather than ones invented to make the test pass.
+    """
+    served = FIXTURES["served_page"]
+    denial = FIXTURES["denial_dom"]
+    payload = FIXTURES["api_search"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    empty = FIXTURES["api_empty"]
+    if isinstance(empty, str):
+        empty = json.loads(empty)
+
+    class _FakeOps:
+        driver_errors = (RuntimeError,)
+        launch_arg_hint = "--a-flag"
+
+        def __init__(self, html, api, *, status=200):
+            self.html, self.api, self.status = html, api, status
+            self.category_ids = {}
+            self.landed = None
+            self.relaunches = 0
+            self.solves = 0
+            self.screenshots = 0
+
+        def is_live(self): return True
+        def is_landed(self, url): return self.landed == url
+        def set_landed(self, url): self.landed = url
+        def clear_landing(self): self.landed = None
+        def current_url(self): return "https://www.woolworths.com.au/x"
+        def goto(self, url, timeout_ms): return self.status
+        def document_text(self): return self.html
+        def classify(self, html, status=None):
+            return page_flow.classify(html, status, self.current_url())
+        def count(self, selector): return 12
+        def wait_ms(self, ms): pass
+        def screenshot(self, path): self.screenshots += 1
+        def read_tiles(self): return []
+        def fetch_api(self, path, body=None):
+            return 200, self.api, json.dumps(self.api)
+        def api_error_count(self): return 0
+        def rows_from_payload(self, pl, args, page_num, data_source):
+            return P.products_from_payload(
+                pl, page=page_num, data_source=data_source)
+        def proxy_failure(self, exc): return ""
+        def relaunch(self): self.relaunches += 1
+        def handle_captcha(self, args, allow_solve, budget):
+            if allow_solve and budget.charge():
+                self.solves += 1
+            return False
+
+    def run(ops, **over):
+        with tempfile.TemporaryDirectory() as d:
+            a = argparse.Namespace(
+                url="https://www.woolworths.com.au/shop/search/products"
+                    "?searchTerm=milk",
+                mode="search", pages=1, retries=1, retry_delay=0, delay=0,
+                page_size=36, dump_html=None, solve_captcha="when-blocked",
+                out=os.path.join(d, "o"), headless=False,
+                proxy_block_retries=None)
+            for k, v in over.items():
+                setattr(a, k, v)
+            return page_flow.fetch_one_page(ops, a, None, 1)
+
+    # 1. a served page with a full payload
+    ops = _FakeOps(served, payload)
+    out = run(ops)
+    assert out.ok and out.products, "a served page produced no rows"
+    assert out.state in ("content", "shell"), out.state
+    assert out.blocked_by is None
+
+    # 2. the Akamai denial: blocked, retried, a screenshot, never parsed
+    ops = _FakeOps(denial, payload, status=403)
+    out = run(ops)
+    assert out.blocked_by, "the denial was not recognised as a refusal"
+    assert not out.products
+    assert ops.relaunches >= 1, "a refusal must be retried on a fresh browser"
+    assert ops.screenshots == 1
+
+    # 3. a genuinely empty listing: NOT a parser failure
+    ops = _FakeOps(served, empty)
+    out = run(ops)
+    assert out.state == "empty", out.state
+    assert not out.parse_failed, (
+        "an empty listing the site itself reports as empty must not be "
+        "blamed on the parser")
+
+    # 4. the site states results and the parser finds none: OURS, and it
+    #    must not read as a completed page.
+    broken = json.loads(json.dumps(payload))
+    for key in ("Bundles", "Products"):
+        if key in broken:
+            broken[key] = []
+    # Measured on this fixture rather than guarded with an `if`: emptying
+    # `Products` leaves `SearchResultsCount` at 2,205, so the site states
+    # results and the parser produces none — which is the case, not a
+    # scenario the test might skip past.
+    assert P.total_count(broken) == 2205, (
+        f"the fixture no longer states a total ({P.total_count(broken)}); "
+        f"without one this branch tests nothing")
+    ops = _FakeOps(served, broken)
+    out = run(ops)
+    assert out.state == "parse_failed", out.state
+    assert out.parse_failed is True
+    assert not out.ok, (
+        "a parser failure counted as a completed page — the audit's P1, "
+        "now guarded in ONE place instead of three")
+
+    # 5. a page that is never served spends the whole block budget and
+    #    reports blocked rather than empty.
+    ops = _FakeOps(denial, payload, status=403)
+    out = run(ops, proxy_block_retries=None)
+    assert ops.relaunches == page_flow.block_retries(False), (
+        f"{ops.relaunches} relaunch(es) against a budget of "
+        f"{page_flow.block_retries(False)}")
+
+    # 6. ALREADY LANDED, and refused in between. The loop must re-classify
+    #    the document it finds rather than assume the page it was served
+    #    once is the page that is there now. Two of the three engines used
+    #    to hardcode "content" on this path; the third re-classified, and
+    #    the third was right — a session can be refused between page 1 and
+    #    page 2, and the other two would have carried on asking the API
+    #    from inside a denial page.
+    ops = _FakeOps(served, payload)
+    first = run(ops)
+    assert first.ok and ops.landed, "the first fetch did not land"
+    ops.html = denial          # refused while we sat on the page
+    second = run(ops)
+    assert second.blocked_by, (
+        "a session refused between pages was reported as content, because "
+        "the loop trusted that it had already been served this URL")
+    assert not second.products
+
+@check
+def test_every_ops_method_reaches_a_session_attribute_that_exists():
+    """`self.session.<x>` must be something the session class really has.
+
+    Written because it happened, on the first live run after the loop was
+    shared: `PuppeteerOps.goto` called `self.session.run(...)` where that
+    engine's bridge is `self.session.bridge.run(...)`. The METHOD existed,
+    so the ops-coverage check above was perfectly happy; the attribute did
+    not, so the engine died with `AttributeError` on its first navigation —
+    in BOTH modes, on every URL.
+
+    That is the same shape as §17's call-binding check and as the bug that
+    produced `'Page' object has no attribute 'page'` here in v0.1.0: an
+    arity-compatible call into something that is not there. Offline it is
+    invisible to import, `--help`, `compileall` and the undefined-name walk
+    (which is pool-scoped on purpose), and a live run of all three engines
+    is three minutes. This is five lines and instant.
+
+    Pool-scoped like its neighbour: every attribute ASSIGNED anywhere on a
+    session counts as present, so this under-reports rather than inventing
+    problems.
+    """
+    checked = 0
+    for name in ENGINE_NAMES:
+        tree = ast.parse((ROOT / f"{name}.py").read_text(encoding="utf-8"))
+        session_cls = next(
+            (n for n in tree.body
+             if isinstance(n, ast.ClassDef) and "Session" in n.name), None)
+        ops_cls = next(
+            (n for n in tree.body
+             if isinstance(n, ast.ClassDef) and n.name.endswith("Ops")), None)
+        if session_cls is None or ops_cls is None:
+            continue
+
+        have = {m.name for m in session_cls.body
+                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for node in ast.walk(session_cls):
+            # `self.x = ...`, including the tuple form.
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target] if isinstance(node, ast.AnnAssign)
+                       else [])
+            for t in targets:
+                parts = t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]
+                for part in parts:
+                    if (isinstance(part, ast.Attribute)
+                            and isinstance(part.value, ast.Name)
+                            and part.value.id == "self"):
+                        have.add(part.attr)
+
+        wanted = set()
+        for node in ast.walk(ops_cls):
+            # self.session.<attr>
+            if (isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "session"
+                    and isinstance(node.value.value, ast.Name)
+                    and node.value.value.id == "self"):
+                wanted.add(node.attr)
+
+        missing = sorted(wanted - have)
+        assert not missing, (
+            f"{ops_cls.name} reaches {missing} on {session_cls.name}, which "
+            f"does not have it. The method exists, so the ops-coverage "
+            f"check passes and the engine dies on its first use")
+        checked += 1
+    assert checked == len(ENGINE_NAMES), (
+        f"only {checked} of {len(ENGINE_NAMES)} engines had both a session "
+        f"and an ops class — this check scanned less than it should")
 
 def main() -> int:
     total = len(PASSES) + len(FAILURES)
