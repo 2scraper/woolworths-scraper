@@ -9,7 +9,7 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
-## [Unreleased]
+## [0.3.1] — 2026-10-08
 
 ### Fixed
 
