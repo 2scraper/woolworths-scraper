@@ -321,28 +321,6 @@ LIST_CSV_SEPARATOR = " | "
 # ===========================================================================
 # Replacing a file without destroying the one that is already there
 # ===========================================================================
-# The mode a finished output gets. `NamedTemporaryFile` creates at 0600 and
-# `os.replace` KEEPS the temp file's mode, so switching to an atomic write
-# silently makes every output readable only by the user that produced it —
-# which breaks a consumer running as another account, a container user or a
-# web server, and breaks it only once the write became atomic. Measured
-# 2026-10-08 across the family, by CALLING each repo's sidecar writer: of
-# 43 repos, 8 produce a 0600 sidecar, and they are exactly the ones that
-# took `_atomic` without this.
-#
-# 0644 is then masked with the process umask, so this widens nothing the
-# user's own umask would have closed; it only stops the write NARROWING the
-# file behind their back.
-_OUTPUT_MODE = 0o644
-
-
-def _current_umask() -> int:
-    """The process umask. There is no way to read it but to set it."""
-    value = os.umask(0)
-    os.umask(value)
-    return value
-
-
 @contextlib.contextmanager
 def _atomic(path: str, newline: Optional[str] = None):
     """Write to a temporary file beside `path`, then rename over it.
@@ -379,8 +357,28 @@ def _atomic(path: str, newline: Optional[str] = None):
             yield handle
             handle.flush()
             os.fsync(handle.fileno())
-        # Before the rename, so the file is never visible at 0600 at all.
-        os.chmod(handle.name, _OUTPUT_MODE & ~_current_umask())
+        # `NamedTemporaryFile` creates at 0600 and `os.replace` keeps the
+        # temp file's mode, so without this every output comes out readable
+        # by its owner alone — a regression from `open(path, "w")`, which
+        # honours the umask, and one that only appears once the write became
+        # atomic. Measured across the family on 2026-10-08 by CALLING each
+        # repo's sidecar writer: of 43 repos, 8 produce a 0600 sidecar, and
+        # they are exactly the ones that took `_atomic` without this.
+        #
+        # An existing target keeps its OWN mode, because someone may have
+        # tightened it on purpose and a save should not undo that. A new one
+        # gets exactly what `open()` would have given it. Lifted from
+        # hackernews-scraper, which fixed this first — the first version
+        # written here used a flat `0o644 & ~umask`, which quietly narrows
+        # 0664 to 0644 under umask 002 and clobbers a deliberately tightened
+        # file (§16: lift the sibling's fix, do not invent a second one).
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(handle.name, mode)
         os.replace(handle.name, path)
     except BaseException:
         # Including KeyboardInterrupt and SystemExit: an interrupted run
