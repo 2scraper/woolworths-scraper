@@ -9,7 +9,7 @@ that every flag and every default is frozen, so a behaviour-changing default
 can land in one — and when it does, the entry leads with it in a blockquote
 rather than leaving anyone to discover it from their own output.
 
-## [Unreleased]
+## [0.2.0] - 2026-10-08
 
 > **A write that died halfway destroyed the previous good output.** Every
 > output file was opened with `open(path, "w")`, which truncates before the
@@ -89,6 +89,13 @@ rather than leaving anyone to discover it from their own output.
   repo's sidecar writer rather than reading it: of 43 repos, **8 produce a
   0600 sidecar**, and they are exactly the ones that took the atomic writer
   without this — two others (craigslist, quora) had already taken both.
+- **`.gitignore` covers every `.env` variant, not just `.env`.** A working
+  copy renamed the way people actually rename one — `.env.bak`, `.env.local`,
+  `.env.save` — was untracked but NOT ignored: one `git add -A` from a
+  commit, and invisible to the person deciding whether running that is safe.
+  `.env*` with `!.env.example`, so the documented example stays tracked.
+  This landed in #5 on 2026-09-17 and was recorded in no release section
+  until now; CLAUDE.md §22 has the two occasions the family paid for it.
 - **The exit-code commentary in `output_writer.py` described another site.**
   It listed a `/p/<slug>` discovery hub, "no stories", an Indonesian
   no-results string and a refusal that resets the HTTP/2 stream — none of
@@ -175,7 +182,7 @@ rather than leaving anyone to discover it from their own output.
   told to check the browser before buying an exit.
 
 
-## [0.1.2] — 2026-09-16
+## [0.1.2] — 2026-09-17
 
 ### Fixed
 
