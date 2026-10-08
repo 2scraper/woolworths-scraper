@@ -230,9 +230,15 @@ def _print_summary(result: dict) -> None:
 def _run_status(path: str) -> Tuple[Optional[str], Optional[dict]]:
     """Read the `<out>.meta.json` sidecar beside a run's JSON output.
 
-    Returns (status, meta), or (None, None) when there is no sidecar — which
-    is the normal case for output written before run metadata existed, or by
-    a single-page run (no pagination to cut short).
+    Returns (status, meta), or (None, None) when there is no sidecar.
+
+    That used to be described here as "the normal case for a single-page
+    run", and it is not: `finish_run` writes a sidecar whenever it writes
+    rows, so every run this tool is meant to read has one. A file without
+    one is output from before the sidecar existed, a hand-edited file, or
+    the leftovers of a run that failed — and none of those can be checked
+    for completeness, mode, listing or store. `_check_comparable` therefore
+    REFUSES it rather than skipping the checks in silence.
     """
     meta_path = re.sub(r"\.json$", "", path) + ".meta.json"
     try:
@@ -258,7 +264,17 @@ def _check_comparable(args) -> bool:
     for label, path in (("--old", args.old), ("--new", args.new)):
         status, meta = _run_status(path)
         if status is None:
-            continue  # no sidecar: nothing to check, see _run_status
+            # STRICT. Without a sidecar nothing below can be checked — not
+            # completeness, not mode, not which listing or which store —
+            # so skipping them quietly is how a diff of two unrelated runs
+            # reports 100% churn and looks like news. `--force` is the
+            # opt-out, same as for a partial run.
+            problems.append(
+                f"{label} ({path}) has no .meta.json beside it, so there is "
+                f"no way to tell whether it was complete, what listing it "
+                f"read or which store served it. Every check below is "
+                f"blind on this file.")
+            continue
         mode = (meta or {}).get("mode")
         if mode:
             modes[label] = mode

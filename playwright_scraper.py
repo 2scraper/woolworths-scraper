@@ -1301,8 +1301,11 @@ def parse_args():
                    help="Shuffle the pool before use, so parallel runs do not "
                         "all start on the same exit.")
     p.add_argument("--proxy-block-retries", type=int, default=4, metavar="N",
-                   help="How many exits to try when a page comes back refused "
-                        "(default 4, and only with a pool).")
+                   help="How many EXTRA attempts to make when a page comes "
+                        "back refused, each on the next exit (default 4, "
+                        "and only with a pool). It is a count of RETRIES, "
+                        "not of attempts: 4 means up to 5 landings in "
+                        "total, and 0 means try once and report it blocked.")
     p.add_argument("--twocaptcha-key", default=None,
                    help="2Captcha API key. Prefer TWOCAPTCHA_KEY in .env — a "
                         "key in argv is readable by anything that can run ps.")
