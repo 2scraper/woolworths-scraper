@@ -90,11 +90,25 @@ rather than leaving anyone to discover it from their own output.
 - **`listing` and `store_ids` in the sidecar.** `--category` was parsed,
   defaulted from the URL, and then read by nothing — not a column, not the
   sidecar, not the log.
-- **A `force_live` input on the canary.** The live steps were gated on a
-  proxy secret that has never been set, so every green run since the repo
-  went public has been the skip branch. Whether a GitHub runner is served
-  at all was never measured — this is what measures it, and §§21/24 say a
-  canary that CAN pass without a credential must not be gated on one.
+### Changed
+
+- **The canary runs live, daily, with no credential.** It was gated on a
+  `WOOLWORTHS_PROXY` secret that has never been set, so every green run
+  since this repo went public was the skip branch — a green badge over an
+  untested claim. The gate came from an inference on the wrong axis
+  ("Akamai refuses datacentre addresses"); what was actually measured is
+  that the site refuses HEADLESS and serves HEADFUL.
+
+  Measured 2026-10-08 on a bare runner with no secret of any kind: Azure
+  `westus3`, headful under Xvfb, **109 rows, `status: complete`, exit 0,
+  every assertion passed**. §§21/24: a canary that can pass without a
+  credential must never be gated on one. A secret is still used where one
+  is set, through the environment rather than a command line.
+
+- **The README and the blocked-run advice no longer say the address is the
+  problem.** Two datacentre addresses have now been served headful — a
+  German VPS and a US GitHub runner — so a reader whose run is refused is
+  told to check the browser before buying an exit.
 
 
 ## [0.1.2] — 2026-09-16

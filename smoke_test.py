@@ -1304,27 +1304,28 @@ def test_diff_runs_refuses_two_different_listings():
 
 
 @check
-def test_the_canary_can_be_run_without_a_secret():
+def test_the_canary_is_not_gated_on_a_credential():
     """Sections 21 and 24: a canary that CAN pass without a credential must
-    not be gated on one. Whether a GitHub runner is served headful was never
-    measured, so the workflow carries the input that measures it."""
-    wf = (ROOT / ".github/workflows/canary.yml").read_text(encoding="utf-8")
-    assert "force_live" in wf, (
-        "there is no way to test the live path without setting a secret, so "
-        "the gate can never be shown to be unnecessary")
-    assert "env.HAVE_PROXY == 'true'" not in wf, (
-        "the live steps are still gated on the secret alone")
-    # The gate must actually CONSULT the input. A first version of this
-    # check only looked for the two names anywhere in the file, and a
-    # planted fault that removed `force_live` from the condition while
-    # leaving it defined kept the suite green — section 26's "a control
-    # that stays green is a finding".
-    gate = [l for l in wf.splitlines() if "RUN_LIVE:" in l]
-    assert gate, "no RUN_LIVE gate at all"
-    assert "force_live" in gate[0], (
-        f"the gate does not read the input: {gate[0].strip()!r} — so the "
-        "live path still cannot be exercised without a secret")
+    never be gated on one.
 
+    This one was, on the reasoning that "Akamai refuses datacentre addresses
+    and a GitHub runner is one" — an inference from the wrong axis, since
+    what was measured is that the site refuses HEADLESS and serves HEADFUL.
+    Measured 2026-10-08 by forcing the live path on a bare runner with no
+    secret of any kind: Azure westus3, 109 rows, status complete, exit 0.
+    Every scheduled run before that had been the skip branch, so the badge
+    was green over a claim that nothing tested.
+    """
+    wf = (ROOT / ".github/workflows/canary.yml").read_text(encoding="utf-8")
+    assert "HAVE_PROXY" not in wf and "RUN_LIVE" not in wf, (
+        "the live steps are gated again, so a green badge means nothing")
+    for step in ("Run the canary", "Assert what the run actually produced"):
+        assert f"name: {step}" in wf, f"the canary lost its {step!r} step"
+    # A proxy secret, where one IS set, must still reach the run — and still
+    # through the environment rather than a command line (section 3).
+    assert "WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}" in wf, (
+        "a proxy secret would no longer be used even if set")
+    assert "--proxy " not in wf, "a credential must not reach a command line"
 
 # ===========================================================================
 # 11. Credentials, config, wording

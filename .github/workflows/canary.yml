@@ -3,45 +3,37 @@ name: canary
 # One real run a day against woolworths.com.au, and the only workflow in this
 # repo that touches the site. Everything else is offline (see tests.yml).
 #
-# WHY THIS CANARY SKIPS BY DEFAULT
-# --------------------------------
-# Akamai refuses this site to a datacentre address, and a GitHub runner is
-# one. Measured 2026-09-16 from a datacentre exit: four URLs fetched HEADLESS
-# were refused 4 of 4 with Akamai's 403, and the same four fetched HEADFUL
-# were served 4 of 4 — but a runner has no display, so the live steps below
-# run the browser under Xvfb, and even then the ADDRESS is still a datacentre
-# one.
+# THIS CANARY RUNS LIVE, EVERY DAY, WITH NO CREDENTIAL — on purpose.
 #
-# So without a residential exit this canary would be red every single day,
-# and a check that is always red teaches everyone to ignore checks (§11). It
-# therefore SKIPS, loudly and green, when no proxy secret is set:
+# It used to skip unless a `WOOLWORTHS_PROXY` secret was set, on the reasoning
+# that "Akamai refuses this site to a datacentre address, and a GitHub runner
+# is one". The first half of that was never measured and the second half does
+# not follow. What WAS measured is that this site refuses HEADLESS and serves
+# HEADFUL: 0 of 4 against 4 of 4 from one datacentre address on 2026-09-16.
+# The gate was an inference from the wrong axis.
 #
-#     gh secret set WOOLWORTHS_PROXY --repo 2scraper/woolworths-scraper
+# Measured 2026-10-08, forcing the live path on a bare runner with no secret
+# of any kind: Azure westus3, headful under Xvfb, **109 rows, status
+# complete, exit 0, every assertion passed**. So the credential buys nothing
+# here and the gate bought nothing but a green badge over an untested claim —
+# every scheduled run since this repo went public had been the skip branch.
 #
-# The secret goes through the ENVIRONMENT rather than a commented-out
-# `--proxy` line, because `env_config.py` already reads exactly that variable
-# and an unset secret arrives as an empty string which the loader treats as
-# unset. One line is therefore correct with and without it, and the
-# credential never reaches a command line (§3).
+# Sections 21 and 24: a canary that CAN pass without a credential must never
+# be gated on one. The README's central promise is that this site needs no
+# key, no proxy and no account, and an ungated daily run is that sentence
+# under test every morning. If Woolworths starts refusing runners, this goes
+# red the next day and the promise is retested without anyone remembering to.
 #
-# `secrets` is not available in a job-level `if`, so presence is tested
-# through job `env` and read in each step's `if`.
+# A `WOOLWORTHS_PROXY` secret is still USED if one is set — it goes through
+# the ENVIRONMENT rather than a `--proxy` line, because `env_config.py`
+# already reads that variable, an unset secret arrives as an empty string
+# which the loader treats as unset, and the credential never reaches a
+# command line (§3).
 
 on:
   schedule:
     - cron: "17 19 * * *"       # 05:17 Australian eastern time, off-peak
   workflow_dispatch:
-    inputs:
-      force_live:
-        description: >-
-          Run the live steps even with no WOOLWORTHS_PROXY secret. This
-          exists to MEASURE whether a GitHub runner can reach this site at
-          all: the skip below was written from a measurement of headless
-          against headful on one datacentre address, and whether GitHub's
-          own addresses are served headful was never tested. A canary that
-          can pass without a credential must not be gated on one.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -50,11 +42,6 @@ jobs:
   canary:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      HAVE_PROXY: ${{ secrets.WOOLWORTHS_PROXY != '' }}
-      # Either a real exit, or an explicit request to measure without one.
-      RUN_LIVE: ${{ secrets.WOOLWORTHS_PROXY != '' || inputs.force_live }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -62,35 +49,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Explain the skip and stop
-        if: env.RUN_LIVE != 'true'
-        run: |
-          echo "::notice::No WOOLWORTHS_PROXY secret is set, so the live run is skipped rather than failed."
-          {
-            echo "### Canary skipped"
-            echo
-            echo "Akamai refuses woolworths.com.au to datacentre addresses, and a GitHub"
-            echo "runner is one. Measured 2026-09-16: 4 of 4 URLs refused headless from a"
-            echo "datacentre exit, 4 of 4 served headful from the same address."
-            echo
-            echo "A canary that cannot pass must skip rather than fail: a check that is"
-            echo "always red teaches everyone to ignore checks."
-            echo
-            echo 'Set a residential exit to turn it on:'
-            echo '```'
-            echo 'gh secret set WOOLWORTHS_PROXY --repo 2scraper/woolworths-scraper'
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Install the Playwright engine
-        if: env.RUN_LIVE == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-playwright.txt
           playwright install --with-deps chromium
 
       - name: Install Xvfb
-        if: env.RUN_LIVE == 'true'
         # Headful, not headless, and that is the measurement above rather
         # than a preference. A runner has no display, so the browser gets a
         # virtual one.
@@ -101,7 +66,6 @@ jobs:
       # a sibling repo — and on this site page 2 onward is where the
       # ads-repeat-forever behaviour lives (§7).
       - name: Run the canary
-        if: env.RUN_LIVE == 'true'
         id: run
         env:
           WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}
@@ -121,7 +85,6 @@ jobs:
           echo "The run exited $code."
 
       - name: Interpret the exit code
-        if: env.RUN_LIVE == 'true'
         run: |
           case "${{ steps.run.outputs.exit_code }}" in
             0) echo "::notice::Run completed." ;;
@@ -137,7 +100,6 @@ jobs:
       # a broken read cannot pass. Bakery held 575 products over 16 pages;
       # three pages is ~110 rows, of which a handful are ads.
       - name: Assert what the run actually produced
-        if: env.RUN_LIVE == 'true'
         run: |
           python3 - <<'PY'
           import json, sys
@@ -215,7 +177,7 @@ jobs:
           PY
 
       - name: Upload artefacts
-        if: always() && env.RUN_LIVE == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: canary-${{ github.run_id }}
