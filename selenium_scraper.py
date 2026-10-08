@@ -174,9 +174,25 @@ class PageOutcome:
     api_errors: int = 0
     unauthorised: bool = False
 
+    # A page whose PARSER produced nothing from a payload the site said
+    # held results. Separate from `load_failed` on purpose: the content
+    # arrived, so this is ours rather than the network's, and the log says
+    # so — but it must not count as a completed page.
+    #
+    # This was the audit's P1 and it is the family defect section 26 records
+    # binance hitting for real. The state was being SET and then discarded:
+    # `ok` consulted only the two fields below, so a parser failure came
+    # back as a page that succeeded with zero rows, which `advance_page`
+    # then read as the end of the listing. A three-page run over a renamed
+    # container reported exit 0, status complete, pagination_exhausted, an
+    # empty `pages_failed`, and page 1's rows — with the parser-failure
+    # ERROR printed two lines above it.
+    parse_failed: bool = False
+
     @property
     def ok(self) -> bool:
-        return not self.load_failed and self.blocked_by is None
+        return (not self.load_failed and not self.parse_failed
+                and self.blocked_by is None)
 
 
 class _Session:
@@ -781,7 +797,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
     """
     outcome = PageOutcome(page_num=page_num, url=url or args.url)
     has_pool = bool(pool and len(pool) > 1)
-    block_retries = page_flow.block_retries(has_pool)
+    block_retries = page_flow.block_retries(
+        has_pool, getattr(args, "proxy_block_retries", None))
 
     html = state = None
     for block_attempt in range(block_retries + 1):
@@ -794,7 +811,12 @@ def _fetch_one_page(session, args, pool, page_num: int,
         if block_attempt < block_retries:
             if pool and page_flow.RETRY_NEEDS_FRESH_CONTEXT:
                 try:
-                    pool.rotate()
+                    # `advance()`, not `rotate()`: ProxyPool stores the
+                    # rotation MODE as `self.rotate`, so `pool.rotate()`
+                    # is a string and calling it raised TypeError — a
+                    # crash (exit 1) on every rotation, in all three
+                    # engines, on the one path a pool exists for.
+                    pool.advance("refused by the site")
                 except ProxyError as e:
                     logger.warning("Could not rotate the exit: %s", e)
             session.landed_url = None
@@ -960,6 +982,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         with open(f"{debug_html}.api.json", "w", encoding="utf-8") as f:
             f.write(text or "")
         outcome.state = "parse_failed"
+        outcome.parse_failed = True
         logger.error(
             "The site states %s result(s) for this listing and the parser "
             "produced NONE. That is a parser failure, not an empty "

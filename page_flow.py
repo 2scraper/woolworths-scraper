@@ -219,7 +219,22 @@ BLOCK_RETRIES_WITH_POOL = 4
 RETRY_NEEDS_FRESH_CONTEXT = True
 
 
-def block_retries(has_pool: bool) -> int:
+def block_retries(has_pool: bool, requested: Optional[int] = None) -> int:
+    """How many extra attempts a refused page gets.
+
+    `requested` is `--proxy-block-retries`, and it was being ignored: the
+    engines called this with `has_pool` alone, so the flag parsed, defaulted
+    and changed nothing — section 17's "a policy constant nothing reads",
+    wearing a CLI flag. Measured with `--proxy-block-retries 0` and a
+    two-exit pool: the run still made every attempt the constant allows.
+
+    The flag counts EXTRA attempts after the first, which is why 0 is a
+    meaningful value and is honoured rather than treated as unset. It only
+    applies with a pool — without one there is nothing to rotate to, and the
+    constant is the re-fetch budget.
+    """
+    if has_pool and requested is not None:
+        return max(0, int(requested))
     return BLOCK_RETRIES_WITH_POOL if has_pool else BLOCK_RETRIES_WITHOUT_POOL
 
 
@@ -270,7 +285,25 @@ def concurrency_refusal(mode: str = "", url: str = "") -> Optional[str]:
 
 
 def page_cap_reached(page_num: int) -> bool:
-    return page_num >= PAGE_CAP
+    """Whether `page_num` is past the cap. INCLUSIVE: page 200 of a 200-page
+    cap is the last page fetched, not the first one skipped.
+
+    It read `>=`, so `--pages 200` fetched 199 — the help says "cap 200" and
+    the code meant 199.
+    """
+    return page_num > PAGE_CAP
+
+
+def planned_pages(pages_requested: int) -> List[int]:
+    """Pages 2..N that a run may fetch, bounded by the cap.
+
+    ONE plan, built before the sequential/concurrent choice, because the two
+    branches disagreed: the sequential loop stopped at the cap and the
+    concurrent one queued `range(2, args.pages + 1)` with no bound at all,
+    so `--pages 201 --concurrency 2` planned page 201 against a cap of 200.
+    """
+    last = min(int(pages_requested), PAGE_CAP)
+    return list(range(2, last + 1))
 
 
 # Outcomes of asking for one more page.

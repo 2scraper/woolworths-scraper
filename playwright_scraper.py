@@ -227,9 +227,25 @@ class PageOutcome:
     # the grid is gone, so this is why price_source is 'api' everywhere.
     unauthorised: bool = False
 
+    # A page whose PARSER produced nothing from a payload the site said
+    # held results. Separate from `load_failed` on purpose: the content
+    # arrived, so this is ours rather than the network's, and the log says
+    # so — but it must not count as a completed page.
+    #
+    # This was the audit's P1 and it is the family defect section 26 records
+    # binance hitting for real. The state was being SET and then discarded:
+    # `ok` consulted only the two fields below, so a parser failure came
+    # back as a page that succeeded with zero rows, which `advance_page`
+    # then read as the end of the listing. A three-page run over a renamed
+    # container reported exit 0, status complete, pagination_exhausted, an
+    # empty `pages_failed`, and page 1's rows — with the parser-failure
+    # ERROR printed two lines above it.
+    parse_failed: bool = False
+
     @property
     def ok(self) -> bool:
-        return not self.load_failed and self.blocked_by is None
+        return (not self.load_failed and not self.parse_failed
+                and self.blocked_by is None)
 
 
 # The lowest share of rows that must carry both a title and a price before
@@ -1113,7 +1129,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
     """
     outcome = PageOutcome(page_num=page_num, url=url or args.url)
     has_pool = bool(pool and len(pool) > 1)
-    block_retries = page_flow.block_retries(has_pool)
+    block_retries = page_flow.block_retries(
+        has_pool, getattr(args, "proxy_block_retries", None))
 
     html = state = None
     for block_attempt in range(block_retries + 1):
@@ -1133,7 +1150,12 @@ def _fetch_one_page(session, args, pool, page_num: int,
             # exactly what this site issues.
             if pool and page_flow.RETRY_NEEDS_FRESH_CONTEXT:
                 try:
-                    pool.rotate()
+                    # `advance()`, not `rotate()`: ProxyPool stores the
+                    # rotation MODE as `self.rotate`, so `pool.rotate()`
+                    # is a string and calling it raised TypeError — a
+                    # crash (exit 1) on every rotation, in all three
+                    # engines, on the one path a pool exists for.
+                    pool.advance("refused by the site")
                 except ProxyError as e:
                     logger.warning("Could not rotate the exit: %s", e)
             session.landed_url = None
@@ -1325,6 +1347,7 @@ def _fetch_one_page(session, args, pool, page_num: int,
         with open(f"{debug_html}.api.json", "w", encoding="utf-8") as f:
             f.write(text or "")
         outcome.state = "parse_failed"
+        outcome.parse_failed = True
         logger.error(
             "The site states %s result(s) for this listing and the parser "
             "produced NONE. That is a parser failure, not an empty "
@@ -1337,6 +1360,22 @@ def _fetch_one_page(session, args, pool, page_num: int,
     outcome.products = products
     outcome.final_url = session.page.url
     return outcome
+
+
+def _stop_reason_for(outcome) -> str:
+    """Why the walk stopped, named by what actually went wrong.
+
+    `parser_found_nothing` is binance's name for it (section 26) and is
+    deliberately NOT in `COMPLETE_STOP_REASONS`: the site said it held
+    results and we produced none, so nothing about the catalogue has been
+    established. Without this the branch fell through to
+    `blocked_{blocked_by}` and reported `blocked_None`.
+    """
+    if getattr(outcome, "parse_failed", False):
+        return "parser_found_nothing"
+    if outcome.load_failed:
+        return "page_load_timeout"
+    return f"blocked_{outcome.blocked_by}"
 
 
 def scrape(args) -> int:
@@ -1405,8 +1444,7 @@ def scrape(args) -> int:
             outcomes.append(first)
 
             if not first.ok:
-                stop_reason = ("page_load_timeout" if first.load_failed
-                               else f"blocked_{first.blocked_by}")
+                stop_reason = _stop_reason_for(first)
                 blocked = first.blocked_by is not None
             else:
                 seen_keys.update(p.sku for p in first.products
@@ -1418,7 +1456,8 @@ def scrape(args) -> int:
                     stop_reason = "pagination_exhausted"
                 elif args.pages > 1 and concurrency > 1:
                     session.close()
-                    specs = [(n, args.url) for n in range(2, args.pages + 1)]
+                    specs = [(n, args.url)
+                             for n in page_flow.planned_pages(args.pages)]
                     logger.info("Fetching %d more page(s) across %d workers%s.",
                                 len(specs), concurrency,
                                 f" over {len(pool)} exit(s)" if pool else "")
@@ -1447,9 +1486,7 @@ def scrape(args) -> int:
                                               args.url)
                         outcomes.append(out)
                         if not out.ok:
-                            stop_reason = ("page_load_timeout"
-                                           if out.load_failed
-                                           else f"blocked_{out.blocked_by}")
+                            stop_reason = _stop_reason_for(out)
                             blocked = blocked or out.blocked_by is not None
                             break
 
@@ -1518,6 +1555,15 @@ def scrape(args) -> int:
 
     extra_meta = {
         "mode": args.mode,
+        # WHICH listing, so `diff_runs.py` can refuse two runs of different
+        # ones. `--category` was parsed, defaulted from the URL, and then
+        # read by nothing at all — a flag in the family's own contract list
+        # that did not reach a row, the sidecar or the log.
+        "listing": args.category,
+        # The store every price in this file belongs to. One value per run
+        # in practice; recorded as the set actually seen, so a run that
+        # somehow spanned two says so rather than implying one.
+        "store_ids": sorted({r.store_id for r in all_rows if r.store_id}),
         "stated_total": stated,
         "sponsored_rows": sponsored,
         "api_errors": api_errors,

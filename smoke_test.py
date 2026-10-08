@@ -1168,6 +1168,165 @@ def test_paid_api_kwargs_are_ones_the_driver_accepts():
 
 
 # ===========================================================================
+# 10c. What the October audit found, pinned
+# ===========================================================================
+@check
+def test_a_parse_failure_is_not_a_completed_page():
+    """The audit's P1, and section 26's binance defect on this site.
+
+    `parse_failed` was SET and then discarded: `ok` consulted only
+    `load_failed` and `blocked_by`, so a page whose parser produced nothing
+    from a payload stating results came back as a completed page with zero
+    rows — which `advance_page` reads as the end of the listing. Reproduced
+    on the audited commit with a renamed container: exit 0, status complete,
+    stop_reason pagination_exhausted, pages_failed empty.
+    """
+    if PW is None:
+        return
+    o = PW.PageOutcome(page_num=2, url="u")
+    assert o.ok, "a fresh outcome should be ok"
+    o.parse_failed = True
+    assert not o.ok, (
+        "a parser failure still counts as a completed page — the run will "
+        "report complete over a listing it could not read")
+    assert PW._stop_reason_for(o) == "parser_found_nothing", (
+        f"got {PW._stop_reason_for(o)!r}; without this the branch falls "
+        "through to blocked_None")
+    assert "parser_found_nothing" not in output_writer.COMPLETE_STOP_REASONS, (
+        "a run that could not read the listing must not report complete")
+
+
+@check
+def test_the_page_cap_is_inclusive_and_shared_by_both_branches():
+    """The audit's second P2, both halves.
+
+    `page_cap_reached` read `>=`, so `--pages 200` fetched 199 while the
+    help said "cap 200"; and the concurrent branch queued
+    `range(2, args.pages + 1)` with no bound at all, so
+    `--pages 201 --concurrency 2` planned page 201 against a cap of 200.
+    """
+    cap = P.PAGE_CAP
+    assert not page_flow.page_cap_reached(cap), (
+        f"page {cap} of a {cap}-page cap is the last page fetched, not the "
+        "first one skipped")
+    assert page_flow.page_cap_reached(cap + 1)
+    planned = page_flow.planned_pages(cap + 50)
+    assert planned[-1] == cap, f"the plan runs to {planned[-1]}, not {cap}"
+    assert planned[0] == 2, "page 1 is fetched alone and is not in the plan"
+    assert page_flow.planned_pages(1) == [], "a one-page run plans nothing"
+    if PW is not None:
+        src = inspect.getsource(PW.scrape)
+        assert "planned_pages" in src, (
+            "the concurrent branch builds its own range again, so the two "
+            "branches can disagree about the cap")
+
+
+@check
+def test_proxy_block_retries_reaches_the_policy():
+    """The audit's third P2: the flag parsed, defaulted and did nothing."""
+    assert page_flow.block_retries(True, 0) == 0, (
+        "--proxy-block-retries 0 must mean zero extra attempts; it is a "
+        "meaningful value, not an unset one")
+    assert page_flow.block_retries(True, 7) == 7
+    assert page_flow.block_retries(True, None) == page_flow.BLOCK_RETRIES_WITH_POOL
+    assert page_flow.block_retries(False, 7) == page_flow.BLOCK_RETRIES_WITHOUT_POOL, (
+        "without a pool there is nothing to rotate to, so the flag does not "
+        "apply and the constant is the re-fetch budget")
+    for name in ENGINE_NAMES:
+        src = (ROOT / f"{name}.py").read_text(encoding="utf-8")
+        assert "proxy_block_retries" in src.split("def parse_args")[0], (
+            f"{name} never passes the flag into the policy")
+
+
+@check
+def test_the_pool_is_advanced_by_a_method_that_exists():
+    """NOT in the audit, and worse than what was: `ProxyPool` stores the
+    rotation MODE as `self.rotate`, so `pool.rotate()` is a string and
+    calling it raised TypeError — exit 1, in all three engines, on the one
+    path a proxy pool exists for. A live blocked run without a pool never
+    reaches it, which is why it survived.
+    """
+    pool = proxy_pool.ProxyPool(["http://a:1", "http://b:2"], rotate="per-run")
+    assert isinstance(pool.rotate, str), (
+        "ProxyPool.rotate is no longer the mode string; re-read this check")
+    assert callable(getattr(pool, "advance", None)), "advance() is the method"
+    first = pool.current
+    # `advance` takes a REASON, and it is required. The first fix for this
+    # bug called `pool.advance()` — swapping one TypeError for another, on
+    # the same unreachable path — and this check is what caught it.
+    pool.advance("a test")
+    assert pool.current != first, "advance() did not move to another exit"
+    import inspect as _i
+    assert "reason" in _i.signature(proxy_pool.ProxyPool.advance).parameters
+    # Checked on the AST, not on the text. The first version grepped the
+    # source and failed on the COMMENT that explains the bug — section 22's
+    # "a note about a banned phrase is a use of it", met immediately.
+    for name in ENGINE_NAMES:
+        tree = ast.parse((ROOT / f"{name}.py").read_text(encoding="utf-8"))
+        called = {}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "pool"):
+                called[node.func.attr] = len(node.args)
+        assert "rotate" not in called, (
+            f"{name} calls pool.rotate(), which is the mode string")
+        assert called.get("advance") == 1, (
+            f"{name} must call pool.advance(reason); saw {called}")
+
+
+@check
+def test_every_row_says_which_store_its_price_is_for():
+    """A price is a fact about a place, and the payload states the place."""
+    names = [f.name for f in __import__("dataclasses").fields(Product)]
+    assert "store_id" in names, (
+        "without it, two runs cannot tell a price change from a different "
+        "store's price")
+    rows = P.products_from_payload(FIXTURES["api_category"], page=1)
+    assert rows and all(r.store_id for r in rows), (
+        "FulfilmentStoreId is 100% populated on the measured corpus")
+    assert len({r.store_id for r in rows}) == 1, "one session, one store"
+
+
+@check
+def test_diff_runs_refuses_two_different_listings():
+    """Two complete runs of DIFFERENT categories diffed cleanly: same mode,
+    same host, so every row was reported added or removed — a 100% churn
+    report about two things that were never the same question. The sidecar
+    already carried `start_url`; it was simply unread."""
+    src = (ROOT / "diff_runs.py").read_text(encoding="utf-8")
+    assert "listing" in src and "meta.json" in src, (
+        "diff_runs does not read the sidecar's listing")
+    assert "different listings" in src, "the refusal does not name the cause"
+    assert "fulfilment stores" in src, (
+        "two runs served different stores diff as a price change")
+
+
+@check
+def test_the_canary_can_be_run_without_a_secret():
+    """Sections 21 and 24: a canary that CAN pass without a credential must
+    not be gated on one. Whether a GitHub runner is served headful was never
+    measured, so the workflow carries the input that measures it."""
+    wf = (ROOT / ".github/workflows/canary.yml").read_text(encoding="utf-8")
+    assert "force_live" in wf, (
+        "there is no way to test the live path without setting a secret, so "
+        "the gate can never be shown to be unnecessary")
+    assert "env.HAVE_PROXY == 'true'" not in wf, (
+        "the live steps are still gated on the secret alone")
+    # The gate must actually CONSULT the input. A first version of this
+    # check only looked for the two names anywhere in the file, and a
+    # planted fault that removed `force_live` from the condition while
+    # leaving it defined kept the suite green — section 26's "a control
+    # that stays green is a finding".
+    gate = [l for l in wf.splitlines() if "RUN_LIVE:" in l]
+    assert gate, "no RUN_LIVE gate at all"
+    assert "force_live" in gate[0], (
+        f"the gate does not read the input: {gate[0].strip()!r} — so the "
+        "live path still cannot be exercised without a secret")
+
+
+# ===========================================================================
 # 11. Credentials, config, wording
 # ===========================================================================
 @check
