@@ -695,7 +695,8 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args, allow_solve: bool = True) -> bool:
+def handle_captcha_if_present(page, args, allow_solve: bool = True,
+                              budget=None) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page. The static-HTML and runtime
@@ -796,6 +797,20 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page holds.")
         return False
+    # The budget is charged HERE, immediately before the money is spent,
+    # and not after the solver returns: a failed solve is still billed
+    # (§19). One call site in this engine, inside the block-retry loop —
+    # so without this a page retried four times would buy four solves the
+    # day `page_flow.should_solve` starts returning True.
+    if budget is not None and not budget.charge():
+        logger.warning(
+            "%s detected via %s, but this page has already spent its "
+            "%d-solve budget (page_flow.SOLVES_PER_PAGE). NOT buying "
+            "another. Rotating to a new exit does not refill it: the page "
+            "is what is being paid for.", challenge.kind, challenge.source,
+            budget.limit)
+        return False
+
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
@@ -1133,6 +1148,10 @@ def _fetch_one_page(session, args, pool, page_num: int,
         has_pool, getattr(args, "proxy_block_retries", None))
 
     html = state = None
+    # Per PAGE, not per attempt: the whole point is that retrying
+    # the same page does not buy a second solve for it.
+    solve_budget = page_flow.SolveBudget()
+
     for block_attempt in range(block_retries + 1):
         outcome.load_failed = False
         html, status, state = _land(session, args, pool, outcome)
@@ -1174,7 +1193,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
     try:
         if args.solve_captcha != "never" and session.page is not None:
             if handle_captcha_if_present(session.page, args,
-                                         allow_solve=page_flow.should_solve(state)):
+                                         allow_solve=page_flow.should_solve(state),
+                                         budget=solve_budget):
                 html = _content_when_settled(session.page) or html
                 state = _classify(session.page, html, None)
     except (PWTimeout, PWError) as e:

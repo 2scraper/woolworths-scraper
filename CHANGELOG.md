@@ -11,6 +11,22 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+> **A write that died halfway destroyed the previous good output.** Every
+> output file was opened with `open(path, "w")`, which truncates before the
+> first byte is written — so a crash, a kill, a full disk or a Ctrl-C during
+> a save left a SHORTER file where a complete one had been, and the run's
+> own `.meta.json` could be truncated beside rows that were fine. Writes are
+> atomic from this release. Nothing is needed from you; a scheduled job that
+> has ever been interrupted mid-save is worth re-running.
+
+> **CSV cells that begin `=`, `+`, `-` or `@` are now prefixed with an
+> apostrophe** so a spreadsheet reads them as text rather than executing
+> them. The JSON output is unchanged and still carries the site's exact
+> bytes, so the two files can now differ; `csv_cells_escaped` in the sidecar
+> says by how much. Measured on this site before shipping: **0 of 10,476
+> string cells across 433 live rows** begin with one, so this changes
+> nothing today and is a guard rather than a catch.
+
 > **A parser failure was reported as a COMPLETE run.** If a run ever logged
 > "the parser produced NONE" it still exited 0 with `status: complete` and an
 > empty `pages_failed`, so a scheduled job accepted a truncated file as a
@@ -31,7 +47,55 @@ rather than leaving anyone to discover it from their own output.
 > `--fail-on-change` never fired. If you run it from cron, expect it to start
 > reporting.
 
+### Added
+
+- **A per-page captcha solve budget that is actually consulted.**
+  `page_flow.SOLVES_PER_PAGE` is 1, and `page_flow.SolveBudget` is what
+  enforces it: the engines create one per PAGE, outside the block-retry
+  loop, and it is charged immediately before the solver is called rather
+  than after it returns, because a failed solve is still billed. It is
+  deliberately not refilled by a proxy rotation — a fresh exit is a reason
+  to re-fetch the page, not a fresh allowance to pay for it.
+
+  Nothing is bought on this site today: `should_solve` is False for every
+  state, because Akamai's denial here is ~400 bytes with no widget on it.
+  This guards the day that changes, which is the only day it is expensive.
+  CLAUDE.md §23 measured a sibling buying three Turnstile solves for one
+  page against a `SOLVES_PER_PAGE = 1` that nothing read, and §27.4 then
+  found the same bypass in 33 of the 39 family repos with a solve path.
+- **`csv_cells_escaped` in the run sidecar**, so the divergence between the
+  CSV and the JSON is declared rather than discovered as a stray
+  apostrophe. It merges UNDER anything the engine put in `extra`: a
+  collision there would be housekeeping silently dropping a measurement
+  about the site.
+
 ### Fixed
+
+- **Output files are written atomically** — to a temporary file in the
+  target's own directory, `fsync`ed, then `os.replace`d over the real name.
+  All three writers were truncating: `write_json`, `write_csv` and
+  `write_run_meta`. The sidecar is the one that mattered most, because it is
+  the file a consumer branches on, so a truncated one beside good rows reads
+  as a broken run over data that is fine. Three planted-fault controls, one
+  per writer: each turns the suite red by leaving a previous good file
+  damaged.
+- **An atomic write no longer makes the output private to the user that
+  produced it.** `NamedTemporaryFile` creates at 0600 and `os.replace` keeps
+  the temp file's mode, so adopting atomic writes silently narrows every
+  output — and only once it became atomic, which is the worst time to find
+  out. The mode is set to 0644 masked with the process umask, so a
+  restrictive umask is still respected and nothing the user closed is
+  reopened. Measured across the family on 2026-10-08 by CALLING each
+  repo's sidecar writer rather than reading it: of 43 repos, **8 produce a
+  0600 sidecar**, and they are exactly the ones that took the atomic writer
+  without this — two others (craigslist, quora) had already taken both.
+- **The exit-code commentary in `output_writer.py` described another site.**
+  It listed a `/p/<slug>` discovery hub, "no stories", an Indonesian
+  no-results string and a refusal that resets the HTTP/2 stream — none of
+  which is Woolworths. Replaced with what was measured here: a served answer
+  with no products is a term the catalogue does not match or a page past the
+  end of a listing (HTTP 200, `Success: true`, promoted ads only), and
+  `EXIT_BLOCKED` is Akamai's edge denial at HTTP 403.
 
 - **A page whose parser produced nothing is no longer a completed page.**
   `parse_failed` was being SET and then discarded: `PageOutcome.ok`
