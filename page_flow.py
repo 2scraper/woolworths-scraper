@@ -261,9 +261,11 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
             "It costs nothing and is the most likely fix.")
     if not has_pool:
         bits.append(
-            "Then a residential exit: --proxy/--proxy-file, or "
-            "--cdp-endpoint for the Scraping Browser API. An Australian exit "
-            "is NOT required — a US exit was served this site normally.")
+            "Then an exit: --proxy/--proxy-file, or --cdp-endpoint for the "
+            "Scraping Browser API. Note it may not be the address: two "
+            "DATACENTRE addresses have been served headful, including a "
+            "GitHub runner, so check the browser before buying an exit. An "
+            "Australian one is NOT required either way.")
     else:
         bits.append("The pool rotated and was still refused; try another exit country.")
     return " ".join(bits)

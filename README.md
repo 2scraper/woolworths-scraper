@@ -56,11 +56,18 @@ machine with no display, give the browser a virtual one rather than going
 headless — `xvfb-run -a python3 playwright_scraper.py …`, which is exactly
 what the shipped `Dockerfile` does.
 
-**A residential exit, if your address is refused anyway.** Akamai scores the
-address. `--proxy`, `--proxy-file`, or `--cdp-endpoint` for the
-[2Captcha Scraping Browser API](https://2captcha.com). An **Australian exit
-is not required**: a US exit was served the full catalogue normally, which is
-not true of every site in this family.
+**An exit, only if your address is actually refused.** Two datacentre
+addresses have now been measured being served headful — a German VPS on
+2026-09-16 and a GitHub-hosted runner in Azure `westus3` on 2026-10-08, the
+latter returning 109 rows with `status: complete` and no credential of any
+kind. So "Akamai refuses datacentres" is NOT what this site does; it refuses
+headless clients, and the daily canary runs ungated from a runner to keep
+that claim under test.
+
+If your address is refused anyway: `--proxy`, `--proxy-file`, or
+`--cdp-endpoint` for the [2Captcha Scraping Browser API](https://2captcha.com).
+An **Australian exit is not required** — both a US Scraping Browser exit and
+a US runner were served the full catalogue.
 
 **A 2Captcha key buys you the proxy and the Scraping Browser here, not a
 solve.** Being precise about that, because it decides whether to spend money:
