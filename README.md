@@ -95,7 +95,7 @@ family has it wired and measured.
 
 ## What it collects
 
-One row per product, 41 columns. The coverage figures are from a 660-row
+One row per product, 42 columns. The coverage figures are from a 660-row
 corpus (589 distinct products) drawn on 2026-09-16 from five search terms and
 three category nodes — a snapshot of one day, not a property of the site.
 
@@ -116,11 +116,27 @@ three category nodes — a snapshot of one day, not a property of the site.
 | `health_star_rating` | the Australian Health Star Rating, 0.5–5 | 53.6% |
 | `dietary_claims` `allergy_statement` `ingredients` `storage_instructions` | | 74.4% / 71.8% / 83.2% / 65.3% |
 | `image_url` | | 100% |
+| `store_id` | **which fulfilment store these prices are for** — a price is a fact about a place | 100% |
 | `data_source` `page` `position` | provenance | 100% |
 
 [`sample_output.json`](sample_output.json) and
 [`sample_output.csv`](sample_output.csv) are twelve rows cut from a real run,
 unedited.
+
+**Two things about the files themselves.** Every output is written
+atomically — to a temporary file beside it, `fsync`ed, then renamed over the
+real name — so a crash, a kill or a full disk mid-save cannot leave you with
+a truncated file where last night's good one was. That applies to
+`<out>.meta.json` as much as to the rows, because the sidecar is the file a
+consumer branches on.
+
+And a CSV cell that begins `=`, `+`, `-` or `@` is prefixed with an
+apostrophe, which spreadsheets read as "this is text" and do not display, so
+opening the file cannot execute a formula somebody put in a product name.
+The JSON keeps the site's exact bytes, so the two files can differ and
+`csv_cells_escaped` in the sidecar says by how much. Measured here before it
+shipped: **0 of 10,476 string cells across 433 live rows** begin with one, so
+today it is a guard rather than a catch.
 
 ### Traps that look like bugs
 

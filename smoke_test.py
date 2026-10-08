@@ -37,10 +37,13 @@ from __future__ import annotations
 import ast
 import inspect
 import io
+import argparse
+import dataclasses
 import json
 import os
 import pathlib
 import re
+import stat
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
@@ -1754,6 +1757,448 @@ def test_every_engine_help_runs():
 
 
 # ===========================================================================
+# ===========================================================================
+# 15. Replacing a file without destroying it (§27.1, §27.2)
+# ===========================================================================
+# These assert the BEHAVIOUR — a write that dies halfway leaves the previous
+# file intact — rather than grepping `output_writer.py` for `_atomic`. A
+# textual check passes the moment the name appears, including in the comment
+# that explains why it is needed (§22: the first version of another check in
+# this file matched the prose describing the bug it guarded).
+
+class _Unserialisable:
+    """json.dump writes the rows before it, then raises on this."""
+
+
+def _poison_row():
+    row = output_writer.Product(source="woolworths", url="u", sku="1",
+                                title="good")
+    bad = output_writer.Product(source="woolworths", url="u", sku="2",
+                                title="bad")
+    bad.title = _Unserialisable()
+    return [row, bad]
+
+
+@check
+def test_a_failed_json_write_leaves_the_previous_good_file_intact():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "out.json")
+        output_writer.write_json(
+            [output_writer.Product(source="woolworths", url="u", sku="1",
+                                   title="last night's good run")], path)
+        good = pathlib.Path(path).read_bytes()
+        assert b"last night" in good
+
+        try:
+            output_writer.write_json(_poison_row(), path)
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("the poisoned write did not fail — this "
+                                 "check is no longer testing anything")
+
+        after = pathlib.Path(path).read_bytes()
+        assert after == good, (
+            "a write that died halfway truncated the previous good output. "
+            "`open(path, 'w')` empties the file before the first byte is "
+            "written, so a crash, a kill or a full disk destroys the last "
+            "known good run by ATTEMPTING to replace it")
+        json.loads(after)   # and it is still valid JSON, not a prefix
+        leftovers = [n for n in os.listdir(d) if n.endswith(".tmp")]
+        assert not leftovers, f"temp file left behind: {leftovers}"
+
+
+@check
+def test_a_failed_sidecar_write_leaves_the_previous_sidecar_intact():
+    """The sidecar matters most: it is the file a consumer branches on."""
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        output_writer.write_run_meta(prefix, {"status": "complete"})
+        path = prefix + ".meta.json"
+        good = pathlib.Path(path).read_bytes()
+
+        try:
+            output_writer.write_run_meta(
+                prefix, {"status": "complete", "x": _Unserialisable()})
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("the poisoned write did not fail")
+
+        assert pathlib.Path(path).read_bytes() == good, (
+            "a truncated sidecar beside good rows reads as a broken run "
+            "over data that is fine")
+
+
+@check
+def test_a_failed_csv_write_leaves_the_previous_good_file_intact():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "out.csv")
+        rows = [output_writer.Product(source="woolworths", url="u", sku="1",
+                                      title="good")]
+        output_writer.write_csv(rows, path)
+        good = pathlib.Path(path).read_bytes()
+
+        original = output_writer._csv_value
+        output_writer._csv_value = lambda v: (_ for _ in ()).throw(
+            RuntimeError("disk full"))
+        try:
+            output_writer.write_csv(rows, path)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("the poisoned write did not fail")
+        finally:
+            output_writer._csv_value = original
+
+        assert pathlib.Path(path).read_bytes() == good
+        assert not [n for n in os.listdir(d) if n.endswith(".tmp")]
+
+
+@check
+def test_the_csv_asks_for_newline_through_the_temp_file():
+    """`newline=""` has to survive the move into the temp file.
+
+    Without it the text layer translates the csv module's own CRLF again
+    and every row gains a stray CR. This asserts the ARGUMENT rather than
+    the bytes on purpose: `os.linesep` is "\n" here, so dropping it
+    changes nothing a Linux CI run can observe, and a byte assertion would
+    be a control that cannot fail (§26) on every machine this suite runs
+    on. Measured: with the argument dropped, the planted fault left the
+    output byte-identical on Linux and would produce "\r\r\n" per row on
+    Windows.
+    """
+    seen = {}
+    original = output_writer._atomic
+
+    def recording(path, newline=None):
+        seen[os.path.basename(path)] = newline
+        return original(path, newline)
+
+    output_writer._atomic = recording
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            prefix = os.path.join(d, "out")
+            rows = [output_writer.Product(source="woolworths", url="u",
+                                          sku="1", title="t")]
+            output_writer.write_csv(rows, prefix + ".csv")
+            output_writer.write_json(rows, prefix + ".json")
+            raw = pathlib.Path(prefix + ".csv").read_bytes()
+    finally:
+        output_writer._atomic = original
+
+    assert seen.get("out.csv") == "", (
+        f"write_csv asked for newline={seen.get('out.csv')!r}; the csv "
+        f"module requires '' and that requirement has to reach the temp "
+        f"file, not just the final name")
+    assert seen.get("out.json") is None, (
+        "only the CSV needs it; passing it to the JSON writer would be "
+        "cargo-culting the flag")
+    assert b"\r\r\n" not in raw
+
+
+@check
+def test_an_output_file_is_not_private_to_the_user_that_wrote_it():
+    """`NamedTemporaryFile` creates at 0600 and `os.replace` keeps the mode.
+
+    So adopting an atomic write silently narrows every output, and breaks a
+    consumer running as another account or as a container user — only once
+    the write became atomic, which is the worst time to find out. Measured
+    2026-10-08, measured by calling each sibling's sidecar writer: of 43
+    repos, 8 produce a 0600 sidecar — exactly the ones that took `_atomic`
+    without this.
+    """
+    previous = os.umask(0o022)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            prefix = os.path.join(d, "out")
+            rows = [output_writer.Product(source="woolworths", url="u",
+                                          sku="1", title="t")]
+            output_writer.write_json(rows, prefix + ".json")
+            output_writer.write_csv(rows, prefix + ".csv")
+            output_writer.write_run_meta(prefix, {"status": "complete"})
+            for suffix in (".json", ".csv", ".meta.json"):
+                mode = stat.S_IMODE(os.stat(prefix + suffix).st_mode)
+                assert mode == 0o644, (
+                    f"{suffix} came out {oct(mode)} rather than 0o644 under "
+                    f"umask 022 — an atomic write that keeps the temp "
+                    f"file's 0600 makes the output private to this user")
+    finally:
+        os.umask(previous)
+
+
+@check
+def test_a_restrictive_umask_is_still_respected():
+    """0644 is MASKED, not forced: this must not widen what the user closed."""
+    previous = os.umask(0o077)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.json")
+            output_writer.write_json(
+                [output_writer.Product(source="woolworths", url="u", sku="1",
+                                       title="t")], path)
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode == 0o600, f"umask 077 should still give 0600, got {oct(mode)}"
+    finally:
+        os.umask(previous)
+
+
+@check
+def test_a_formula_shaped_cell_is_neutralised_in_csv_only():
+    """A cell beginning `=`, `+`, `-`, `@` or whitespace is executed.
+
+    Every string in these rows was written by whoever listed the product.
+    The apostrophe goes in the CSV, which spreadsheets read as "this is
+    text" and do not display; the JSON keeps the site's bytes exactly.
+    """
+    row = output_writer.Product(
+        source="woolworths", url="u", sku="1",
+        title="=HYPERLINK(\"http://evil\",\"Woolworths Milk 2L\")",
+        brand="@SUM(A1:A9)")
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        escaped = output_writer.write_csv([row], prefix + ".csv")
+        output_writer.write_json([row], prefix + ".json")
+        csv_text = pathlib.Path(prefix + ".csv").read_text(encoding="utf-8")
+        js = json.loads(pathlib.Path(prefix + ".json").read_text(encoding="utf-8"))
+
+    assert escaped == 2, f"expected 2 escaped cells, got {escaped}"
+    assert "'=HYPERLINK" in csv_text and "'@SUM" in csv_text
+    assert js[0]["title"].startswith("="), (
+        "the JSON must keep the site's bytes — only the CSV is neutralised")
+    assert js[0]["brand"].startswith("@")
+
+
+@check
+def test_a_negative_number_is_not_turned_into_text():
+    """Escaping `-5` breaks every sum a consumer writes over the column.
+
+    And this schema has negative numbers that matter: `savings_amount` and
+    `discount_pct` are the columns anyone monitoring this site sums.
+    """
+    assert output_writer._csv_escape(-5) == (-5, False)
+    assert output_writer._csv_escape(-5.5) == (-5.5, False)
+    assert output_writer._csv_escape(None) == (None, False)
+    # The string form IS escaped: a cell is a cell, whatever produced it.
+    assert output_writer._csv_escape("-5") == ("'-5", True)
+
+
+@check
+def test_a_list_cell_is_escaped_after_it_becomes_a_string():
+    """The order matters and only one of the two orderings is correct.
+
+    A list is not a string, so `_csv_escape` skips it; the cell it JOINS
+    into can perfectly well start with a formula character. Escaping before
+    the list serialiser therefore misses exactly the case hardest to
+    notice.
+
+    Driven through `write_csv` rather than by composing the two helpers by
+    hand. The first version of this check called
+    `_csv_escape(_csv_value(...))` directly, which is the correct order
+    written out in the test — so it passed with `write_csv` doing it
+    backwards (§24: a weak check passes against a broken filter). Found by
+    planting exactly that fault and watching the suite stay green.
+
+    `Product` has no list column today; the row class is local so the rule
+    is pinned before a column that needs it is added, not after.
+    """
+    @dataclasses.dataclass
+    class _ListRow:
+        sku: str = "1"
+        tags: list = dataclasses.field(default_factory=list)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "out.csv")
+        escaped = output_writer.write_csv(
+            [_ListRow(tags=["=cmd|calc", "fresh"])], path, row_cls=_ListRow)
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+
+    assert escaped == 1, f"the joined list cell was not counted ({escaped})"
+    assert "'=cmd|calc" in text, (
+        "a joined list cell reached the file unneutralised — _csv_escape "
+        "must run AFTER _csv_value")
+
+
+@check
+def test_the_escape_count_reaches_the_sidecar_under_the_callers_extra():
+    """Declared, not discovered.
+
+    The CSV and the JSON deliberately differ once anything is escaped, and
+    `csv_cells_escaped` is what says so. It merges UNDER the caller's
+    `extra`: a collision there would be housekeeping silently dropping
+    something the engine measured about the site.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        rc = output_writer.finish_run(
+            [output_writer.Product(source="woolworths", url="u", sku="1",
+                                   title="=1+1")],
+            prefix, "both", False, blocked=False, stop_reason="completed",
+            pages_requested=1, pages_completed=1, start_url="u",
+            final_url="u", mode="search",
+            extra={"csv_cells_escaped": "the caller's own value"})
+        meta = json.loads(
+            pathlib.Path(prefix + ".meta.json").read_text(encoding="utf-8"))
+    assert rc == 0
+    assert meta["csv_cells_escaped"] == "the caller's own value", (
+        "housekeeping overwrote a value the caller put in `extra`")
+
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        output_writer.finish_run(
+            [output_writer.Product(source="woolworths", url="u", sku="1",
+                                   title="=1+1")],
+            prefix, "both", False, blocked=False, stop_reason="completed",
+            pages_requested=1, pages_completed=1, start_url="u",
+            final_url="u", mode="search")
+        meta = json.loads(
+            pathlib.Path(prefix + ".meta.json").read_text(encoding="utf-8"))
+    assert meta["csv_cells_escaped"] == 1
+
+
+# ===========================================================================
+# 16. One page, one solve (§27.4)
+# ===========================================================================
+# Nothing is bought on this site today — `should_solve` is False for every
+# state, because Akamai's denial here carries no widget. These guard the
+# day that changes, which is the only day the bug is expensive. §23 measured
+# a sibling buying THREE Turnstile solves for one page against a
+# `SOLVES_PER_PAGE = 1` that nothing read; §27.4 then found the same bypass
+# in 33 of 39 family repos.
+
+@check
+def test_the_solve_budget_counts_attempts_not_successes():
+    """A failed solve is still billed (§19: 87 seconds and real money)."""
+    b = page_flow.SolveBudget(limit=2)
+    assert b.charge() is True and b.spent == 1
+    assert b.charge() is True and b.spent == 2
+    assert b.exhausted
+    assert b.charge() is False, "the budget was exceeded"
+    assert b.spent == 2, "a refused charge must not count either"
+
+
+@check
+def test_the_budget_is_not_refilled_by_a_rotation():
+    """A fresh exit is a reason to re-fetch, not a fresh allowance.
+
+    Pinned as a check because the tempting edit is exactly the wrong one:
+    rotation is HOW a run reaches the same page again, so refilling there
+    turns a per-page cap into a per-attempt one — which is the bug.
+    """
+    assert not hasattr(page_flow.SolveBudget, "reset"), (
+        "a reset() on the budget is how SOLVES_PER_PAGE becomes advisory")
+    src = inspect.getsource(page_flow.SolveBudget)
+    assert "rotat" in src.lower(), (
+        "the reason this is not reset on rotation belongs in the code")
+
+
+@check
+def test_every_engine_passes_the_budget_to_every_captcha_call():
+    """Read off disk, NOT behind an engine import.
+
+    §27.4 records this exact check being written so it skipped for the
+    engines whose driver was absent — so a fix that reached one engine of
+    three passed locally with a green suite and failed in `engine-smoke`,
+    which installs each driver. It needs no import and must not have one.
+    """
+    scanned = 0
+    for name in ("playwright_scraper.py", "selenium_scraper.py",
+                 "puppeteer_scraper.py"):
+        tree = ast.parse((ROOT / name).read_text(encoding="utf-8"))
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)
+                 and (getattr(n.func, "id", None)
+                      or getattr(n.func, "attr", None))
+                 == "handle_captcha_if_present"]
+        assert calls, f"{name}: no captcha call found — has it been renamed?"
+        for call in calls:
+            kw = {k.arg for k in call.keywords}
+            assert "budget" in kw, (
+                f"{name}:{call.lineno} calls handle_captcha_if_present "
+                f"without a budget. One unbudgeted call site is all it "
+                f"takes: the cap then describes the other one")
+            scanned += 1
+    assert scanned >= 3, f"only {scanned} call site(s) scanned"
+
+
+@check
+def test_the_budget_is_created_per_page_not_per_attempt():
+    """Outside the block-retry loop, or retrying buys another solve."""
+    for name in ("playwright_scraper.py", "selenium_scraper.py",
+                 "puppeteer_scraper.py"):
+        src = (ROOT / name).read_text(encoding="utf-8")
+        made = src.index("solve_budget = page_flow.SolveBudget()")
+        loop = src.index("for block_attempt in range(block_retries + 1):")
+        assert made < loop, (
+            f"{name}: the budget is built inside the retry loop, so every "
+            f"attempt gets a fresh one and the cap means nothing")
+
+
+@check
+def test_the_charge_happens_before_the_solver_is_called():
+    """After it returns is too late: a failed solve is billed anyway."""
+    for name in ("playwright_scraper.py", "selenium_scraper.py",
+                 "puppeteer_scraper.py"):
+        src = (ROOT / name).read_text(encoding="utf-8")
+        charge = src.index("budget.charge()")
+        solve = src.index("token = solve_recaptcha(")
+        assert charge < solve, f"{name}: charged after the money was spent"
+
+@check
+def test_a_retried_page_buys_only_one_solve():
+    """Drive the real function over a whole block-retry budget.
+
+    The AST checks above say the budget is WIRED; this says it WORKS.
+    §27.4 is explicit that this one is verified by running it: stub the
+    solver, call the real path once per block attempt, and assert the
+    solver was invoked `SOLVES_PER_PAGE` times rather than once per
+    attempt.
+    """
+    if PW is None:
+        return
+    import captcha_solver
+
+    challenge = captcha_solver.CaptchaChallenge(
+        kind="recaptcha_v2", sitekey="6Lfake", page_url="https://x/",
+        source="html")
+    bought = []
+
+    class _Page:
+        url = "https://www.woolworths.com.au/"
+        def evaluate(self, *a, **k): return None
+        def wait_for_timeout(self, *a, **k): return None
+        def reload(self, *a, **k): return None
+
+    saved = {k: getattr(PW, k) for k in
+             ("_content_when_settled", "_count", "detect_recaptcha_v3",
+              "detect_recaptcha_in_page", "reconcile_detections",
+              "solve_recaptcha")}
+    PW._content_when_settled = lambda p: "<html></html>"
+    PW._count = lambda p, sel: 0
+    PW.detect_recaptcha_v3 = lambda h, u: challenge
+    PW.detect_recaptcha_in_page = lambda ev, page_url=None: None
+    PW.reconcile_detections = lambda a, b: challenge
+    PW.solve_recaptcha = (
+        lambda *a, **k: (bought.append(1), "token")[1])
+    try:
+        args = argparse.Namespace(
+            solve_captcha="always", twocaptcha_key="k" * 32,
+            captcha_api="v1", min_score=0.3, out="out", mode="search")
+        budget = page_flow.SolveBudget()
+        attempts = page_flow.block_retries(False) + 1
+        assert attempts > 1, "a one-attempt loop cannot show the bug"
+        for _ in range(attempts):
+            PW.handle_captcha_if_present(
+                _Page(), args, allow_solve=True, budget=budget)
+    finally:
+        for k, v in saved.items():
+            setattr(PW, k, v)
+
+    assert len(bought) == page_flow.SOLVES_PER_PAGE, (
+        f"{attempts} attempts at one page bought {len(bought)} solve(s) "
+        f"against SOLVES_PER_PAGE={page_flow.SOLVES_PER_PAGE}")
+    assert budget.spent == page_flow.SOLVES_PER_PAGE
+
 def main() -> int:
     total = len(PASSES) + len(FAILURES)
     print()

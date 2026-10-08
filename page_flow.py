@@ -211,6 +211,55 @@ def counts_as_blocked(state: str) -> bool:
 # Consulted by all three engines — not a constant that reads like enforcement
 # and enforces nothing (§17). `smoke_test.py` asserts each of these has a
 # consumer outside this module.
+# How many solves ONE PAGE may buy, across every attempt at it.
+#
+# Zero are bought on this site today: `should_solve` is False for every
+# state, because Akamai's denial here carries no widget (see above). The cap
+# exists anyway, and it is not decoration — §23 measured a sibling repo
+# buying THREE Turnstile solves for one page against a `SOLVES_PER_PAGE = 1`
+# that nothing consulted, and §27.4 then measured the same bypass in 33 of
+# the 39 family repos that have a solve path at all.
+#
+# The shape of that bug is the reason this is an OBJECT rather than an
+# integer. A bare constant beside a comment reads like enforcement and
+# enforces nothing (§17), and a budget consulted at one of two call sites is
+# the same defect wearing a number. There is one call site per engine here;
+# it sits INSIDE the block-retry loop, so without a cap a page retried four
+# times would buy four solves the moment the policy flag changed.
+SOLVES_PER_PAGE = 1
+
+
+class SolveBudget:
+    """What one page is allowed to spend, counted where the money goes.
+
+    Charged immediately before the solver is called rather than after it
+    returns, because a FAILED solve is still billed — §19 records an
+    `ERROR_CAPTCHA_UNSOLVABLE` that cost real money after 87 seconds. A
+    budget that only counts successes is a budget that cannot be exceeded
+    on paper while the bill says otherwise.
+
+    Deliberately NOT reset on proxy rotation. A fresh exit is a reason to
+    re-fetch the page, not a fresh allowance to pay for it: the page is the
+    thing being bought, and rotating is how a run reaches the SAME page
+    again.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = int(limit)
+        self.spent = 0
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent >= self.limit
+
+    def charge(self) -> bool:
+        """Take one solve out of the budget. False if there is none left."""
+        if self.exhausted:
+            return False
+        self.spent += 1
+        return True
+
+
 BLOCK_RETRIES_WITHOUT_POOL = 3
 BLOCK_RETRIES_WITH_POOL = 4
 # A rotation is a fresh browser (§8): cookies Akamai issued against exit A
