@@ -1390,7 +1390,7 @@ def parse_args():
                         "profile and workers collide (profile_locked). Note "
                         "every worker is a REAL WINDOW, because this site "
                         "refuses headless.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3). "
                         "The pause between attempts doubles each time.")
     p.add_argument("--retry-delay", type=float, default=2.0,
