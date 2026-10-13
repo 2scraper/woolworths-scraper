@@ -944,7 +944,7 @@ def parse_args():
                    help="Accepted for family compatibility and NOT "
                         "IMPLEMENTED in this engine. Use "
                         "playwright_scraper.py, where it works.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3).")
     p.add_argument("--retry-delay", type=float, default=2.0,
                    help="Seconds before the first retry (default 2.0).")
