@@ -27,6 +27,16 @@ rather than leaving anyone to discover it from their own output.
   `page_flow.attempts` in every entry point; a check reads the source of each
   one and calls the validator, so a new engine declaring the flag with a
   plain int fails the suite.
+- **The DOM price cross-check could confirm nothing and say so only at
+  INFO.** Category pages now paint a 19-tile carousel about a second before
+  the product grid, and the readiness wait counts any tile, so on a fast API
+  answer the cross-check read the carousel, matched none of page 1's rows
+  and reported `dom_confirm.checked: 0` (the daily canary went red on
+  2026-10-13 this way; the rows themselves were correct). The cross-check now
+  waits, for at most 10 s, until a rendered tile carries one of the page's
+  own stockcodes, and logs a WARNING if none ever does. A real two-read
+  capture of the bakery page is in the fixtures, with checks that the early
+  read matches no row and that the wait reaches the grid.
 
 ## [0.4.0] — 2026-10-08
 

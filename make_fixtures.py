@@ -36,6 +36,18 @@ What goes in, and why each one earns its place:
                       of each. A captcha guard tested only against the local
                       page never meets an injection and passes without
                       proving anything (§21).
+    tiles_carousel_first
+                      the rendered tiles of /shop/browse/bakery read twice in
+                      one headful session on 2026-10-15: once when only a
+                      19-tile seasonal carousel had painted, once after the
+                      37-tile grid joined it, beside page 1 of the category
+                      API that session's own UI requested (trimmed as above).
+                      None of the carousel's stockcodes is on that page,
+                      which is how a DOM cross-check taken too early
+                      confirmed 0 rows. Capture file: tiles_bakery.json,
+                      `{"early": [...], "late": [...], "api": [{"json": ...}]}`
+                      with each tile `{href, price_text, cup_text}` as the
+                      engines read it.
     served_page       a page the site really served, WHOLE. Not truncated,
                       and that is deliberate: the two markers this repo got
                       wrong are `akamai` (first occurrence at byte 347,429)
@@ -250,6 +262,7 @@ def build(captures: pathlib.Path) -> dict:
         "stores_none": read_json("stores_none.json") or {"Stores": []},
         # Who the site thinks we are, and which store is pricing the rows.
         "shopper": _scrub_shopper(read_json("shopper.json")),
+        "tiles_carousel_first": _tiles_fixture(read_json("tiles_bakery.json")),
     }
     # The category tree is 2,700 nodes; keep only the top level plus one
     # branch, which is all `category_id_for_slug` needs to be tested on.
@@ -285,6 +298,29 @@ def _scrub_shopper(payload):
     if out.get("SessionId"):
         out["SessionId"] = _SHOPPER_PLACEHOLDER
     return out
+
+
+def _tiles_fixture(capture):
+    """Two tile reads from one session plus the page-1 payload beside them.
+
+    Tiles keep only the three strings an engine's `_read_tiles` returns, in
+    the order the page rendered them; the payload is trimmed like the other
+    listing fixtures.
+    """
+    if not isinstance(capture, dict):
+        return {}
+
+    def slim(tiles):
+        return [{k: t.get(k, "") for k in ("href", "price_text", "cup_text")}
+                for t in tiles or [] if isinstance(t, dict)]
+
+    api = capture.get("api") or [{}]
+    return {
+        "captured": "2026-10-15, headful Chromium, /shop/browse/bakery",
+        "early": slim(capture.get("early")),
+        "late": slim(capture.get("late")),
+        "api_page1": _trim_payload(api[0].get("json") or {}, keep=8),
+    }
 
 
 def _trim_stores(payload, keep: int = 3):
