@@ -11,6 +11,8 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-15
+
 > **Behaviour change — exit codes.** A page whose navigation never returned
 > a document (every attempt timed out, or the proxy failed) now exits **5**
 > ("content not obtained") with `stop_reason` `page_load_timeout` or
@@ -651,6 +653,7 @@ do. `captcha_solver.py` implements reCAPTCHA v2/v3, enterprise reCAPTCHA
 (`TurnstileTaskProxyless`); if Woolworths ever renders one,
 `page_flow.STATE_POLICY` is the single line to change.
 
-[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/2scraper/woolworths-scraper/compare/v0.4.0...v0.5.0
 [0.1.1]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/woolworths-scraper/releases/tag/v0.1.0
