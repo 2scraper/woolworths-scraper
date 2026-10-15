@@ -352,10 +352,23 @@ Browser allows one live connection per profile.
 | `6` | partial — some page failed or was never reached; `pages_failed` and `pages_unattempted` in the sidecar say which |
 
 **A run that finds nothing writes nothing**, so last night's good output
-survives a bad night. `--allow-empty` opts out. Every run writes
-`<out>.meta.json` beside its data with `status`, `stop_reason`, which pages
+survives a bad night. Every run that writes data writes
+`<out>.meta.json` beside it with `status`, `stop_reason`, which pages
 failed by number, `dom_confirm`, `sponsored_rows` and
 `unauthorised_redirect`.
+
+**`--allow-empty` is for a genuine empty result only.** With it, a run
+that finished and found nothing writes an empty JSON (`[]`), a CSV holding
+only its header, and a sidecar with `status: empty` and its `stop_reason`,
+and still exits `4`. It never turns a blocked or failed run into an empty
+one. A blocked run still exits `3`. A run whose content was never obtained,
+or whose parser read nothing from a page that stated rows, still exits `5`.
+A run that saved rows and then stopped early still exits `6`. For the
+zero-row failures no empty row file is written, and an earlier output at
+the same `--out` is left untouched, sidecar included. Only when nothing
+earlier exists there does a blocked or failed `--allow-empty` run write a
+sidecar on its own, with `status: blocked` or `failed`. `diff_runs.py`
+compares an `empty` run like a complete one.
 
 `diff_runs.py` compares two runs by `sku` and refuses to compare runs that
 are not both `complete`, because a partial run's unfetched pages would

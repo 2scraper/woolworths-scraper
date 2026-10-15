@@ -11,6 +11,30 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+> **Behaviour change.** `--allow-empty` now writes an empty file only for a
+> genuine empty result, and its sidecar says `status: empty` (was
+> `failed`). A blocked or failed run with `--allow-empty` no longer
+> replaces an earlier output with an empty file. It keeps its exit code
+> (3 or 5) and leaves that output and its sidecar untouched.
+
+### Fixed
+
+- **`--allow-empty` could destroy the output it exists to protect.** With
+  the flag, a blocked run or a run that never obtained its content wrote
+  an empty JSON and CSV over the previous good result, plus a sidecar
+  saying `failed`. A genuinely empty, complete run was labelled `failed`
+  too, so `diff_runs.py` refused it. Now:
+  - A finished run whose answer was nothing writes `[]`, a header-only
+    CSV and a sidecar with `status: empty` and its `stop_reason`. It
+    exits 4.
+  - Blocked (3), never obtained or parser failure (5) and partial (6) keep
+    their exit codes. No empty row file is written for them, and an
+    earlier output at the same `--out` is kept byte for byte, sidecar
+    included.
+  - When nothing earlier exists, a blocked or failed `--allow-empty` run
+    writes only a sidecar, with `status: blocked` or `failed`.
+  - `diff_runs.py` compares an `empty` run like a complete one.
+
 ## [0.5.0] — 2026-10-15
 
 > **Behaviour change — exit codes.** A page whose navigation never returned
