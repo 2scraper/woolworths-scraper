@@ -15,10 +15,11 @@ Three things are different about this ENGINE:
   shared policy module stays synchronous and single. The bridge also gives
   every call an explicit timeout, which pyppeteer's own API does not.
 
-* **It CAN authenticate a proxy, and Selenium cannot.** Credentials go
-  through `page.authenticate()` rather than onto the command line, where
-  `--proxy-server=user:pass@host` would be readable by anything that can run
-  `ps` (§8).
+* **It can authenticate a proxy, and Selenium cannot.** Credentials are
+  answered to the proxy's own challenge through CDP's Fetch domain (or
+  `page.authenticate()` on the old Chromium pyppeteer bundles), never put on
+  the command line, where `--proxy-server=user:pass@host` would be readable
+  by anything that can run `ps`.
 
 * **pyppeteer is effectively unmaintained** and its own README points at
   Playwright. It is here for parity; prefer playwright_scraper.py.
@@ -71,7 +72,7 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("puppeteer_scraper")
 
-# One definition each, in page_flow, shared by the three engines (§27.5),
+# One definition each, in page_flow, shared by the three engines,
 # with the measurements behind them written down there.
 PageOutcome = page_flow.PageOutcome
 # Where a store lookup lands before asking the locator. Any page the site
@@ -91,14 +92,14 @@ _mask_credentials = page_flow.mask_credentials
 # SPA navigates ITSELF to /unauthorisederror and the grid never renders —
 # while the document still answers 200 and the API still answers 200 with
 # real products, so a run without it returns the right rows, reports success,
-# and silently loses the DOM cross-check (§16). Measured three runs each way
+# and silently loses the DOM cross-check. Measured three runs each way
 # on 2026-09-16: without it 3/3 redirected, with it 3/3 stayed.
 LAUNCH_ARGS = ("--disable-blink-features=AutomationControlled",)
 
 # Chromium's own names for "the proxy is the problem, not the site". Kept
 # identical across the three engines, because the two cases want OPPOSITE
 # responses: a timeout deserves another try at the same exit, a dead proxy a
-# different one (§8).
+# different one.
 _PROXY_ERROR_MARKERS = (
     "ERR_PROXY_CONNECTION_FAILED",
     "ERR_TUNNEL_CONNECTION_FAILED",
@@ -222,15 +223,18 @@ _CREDENTIALS_IN_URL_RE = re.compile(r"([a-z][a-z0-9+.\-]*://)[^\s/@]+:[^\s/@]+@"
                                     re.IGNORECASE)
 
 
-def _chrome_ua(version: str) -> str:
-    """A desktop-Chrome UA from the browser's own reported version.
+def _ua_without_headless(user_agent: str) -> Optional[str]:
+    """The browser's OWN user agent with "HeadlessChrome" made "Chrome", or
+    None when there is nothing to change.
 
-    `browser.version()` returns "HeadlessChrome/115.0.0.0"; the marketing
-    part is what a real Chrome would send.
+    It used to be replaced wholesale with a hardcoded Windows string, sent
+    from a Linux host with no matching client hints: a header that
+    disagreed with `navigator.platform` and with Sec-CH-UA-Platform on every
+    request. Headful (what this site serves) needs no override at all.
     """
-    number = version.split("/")[-1] if "/" in version else version
-    return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            f"(KHTML, like Gecko) Chrome/{number} Safari/537.36")
+    if "HeadlessChrome/" not in (user_agent or ""):
+        return None
+    return user_agent.replace("HeadlessChrome/", "Chrome/")
 
 
 class _Session:
@@ -246,6 +250,8 @@ class _Session:
         # attribute that only exists once something has written it is one
         # rename away from an AttributeError nothing offline can see.
         self.landed_url = None
+        # The CDP session answering proxy auth, when one is needed.
+        self._auth_session = None
 
     def open(self):
         if self.remote:
@@ -255,9 +261,12 @@ class _Session:
             # form and authenticates on the WebSocket upgrade, so an
             # authenticated Scraping Browser endpoint works here — unlike
             # Selenium's debuggerAddress, which has nowhere to put a password.
+            # No ignoreHTTPSErrors here: on connect it makes pyppeteer send
+            # Security.setIgnoreCertificateErrors to the remote browser,
+            # which a managed browser is not obliged to answer, and a
+            # connect that waits on it hangs instead of failing.
             self.browser = self.bridge.run(
-                connect(browserWSEndpoint=self.args.cdp_endpoint,
-                        ignoreHTTPSErrors=True),
+                connect(browserWSEndpoint=self.args.cdp_endpoint),
                 timeout=getattr(self.args, "cdp_connect_timeout",
                                 CONNECT_TIMEOUT))
             self.page = self.bridge.run(self.browser.newPage())
@@ -292,18 +301,66 @@ class _Session:
                    handleSIGTERM=False, handleSIGHUP=False, **launch_kwargs),
             timeout=CONNECT_TIMEOUT * 2)
         self.page = self.bridge.run(self.browser.newPage())
-        version = self.bridge.run(self.browser.version())
-        self.bridge.run(self.page.setUserAgent(_chrome_ua(version)))
+        ua = _ua_without_headless(self.bridge.run(self.browser.userAgent()))
+        if ua:
+            self.bridge.run(self.page.setUserAgent(ua))
         # 1440x900, matching the captures. The viewport decides how far the
         # captures were taken at, so the tile counts in the README mean
         # keeping the window the measured size keeps the README's numbers
         # meaningful.
         self.bridge.run(self.page.setViewport({"width": 1440, "height": 900}))
         if credentials:
-            self.bridge.run(self.page.authenticate(
-                {"username": credentials[0], "password": credentials[1]}))
+            self._install_proxy_auth(*credentials)
         _watch_api(self)
         return self
+
+    def _install_proxy_auth(self, username: str, password: str):
+        """Answer the proxy's auth challenge, on old and current Chromium.
+
+        `page.authenticate()` relies on Network.setRequestInterception,
+        which current Chromium no longer has: it fails with "'Network.
+        setRequestInterception' wasn't found" before the first navigation.
+        It is tried first (it works on the Chromium pyppeteer bundles), and
+        on that one error this falls back to CDP's Fetch domain with
+        `handleAuthRequests`. Every request is paused and continued
+        unchanged; only a challenge whose source is the PROXY is answered.
+        """
+        try:
+            self.bridge.run(self.page.authenticate(
+                {"username": username, "password": password}))
+            return
+        except Exception as e:  # noqa: BLE001 - pyppeteer raises several types
+            if "setRequestInterception" not in str(e):
+                raise
+            logger.info("page.authenticate is not available on this "
+                        "Chromium; answering the proxy through CDP Fetch "
+                        "instead (slower: every request is paused).")
+
+        async def _enable():
+            session = await self.page.target.createCDPSession()
+
+            def _paused(event):
+                asyncio.ensure_future(session.send(
+                    "Fetch.continueRequest", {"requestId": event["requestId"]}))
+
+            def _auth(event):
+                source = (event.get("authChallenge") or {}).get("source")
+                response = ({"response": "ProvideCredentials",
+                             "username": username, "password": password}
+                            if source == "Proxy" else {"response": "Default"})
+                asyncio.ensure_future(session.send(
+                    "Fetch.continueWithAuth",
+                    {"requestId": event["requestId"],
+                     "authChallengeResponse": response}))
+
+            session.on("Fetch.requestPaused", _paused)
+            session.on("Fetch.authRequired", _auth)
+            await session.send("Fetch.enable", {
+                "handleAuthRequests": True,
+                "patterns": [{"urlPattern": "*"}]})
+            return session
+
+        self._auth_session = self.bridge.run(_enable(), timeout=30)
 
     def relaunch(self):
         if self.remote:
@@ -329,7 +386,7 @@ class _Session:
 # ---------------------------------------------------------------------------
 # Only "how to ask this driver" lives here. pyppeteer takes `() => expr` like
 # Playwright and unlike Selenium, which is exactly why page_flow names
-# operations rather than passing JavaScript across the boundary (§1).
+# operations rather than passing JavaScript across the boundary.
 def _count(session, selector: str) -> int:
     try:
         return len(session.bridge.run(session.page.querySelectorAll(selector)))
@@ -346,7 +403,7 @@ def _sleep(ms: int) -> None:
 # be refused while the document keeps answering 200. Counting the refusals is
 # what separates a listing that ran out (COMPLETE) from one whose next page
 # was refused (PARTIAL) — without it the two are the same observation and a
-# throttled run reports "complete" holding page 1 (§7). All three engines
+# throttled run reports "complete" holding page 1. All three engines
 # count this the same way, so all three reach the same verdict.
 _API_PATH_MARKER = "/apis/ui/"
 
@@ -357,7 +414,7 @@ def _watch_api(session) -> None:
     The document and the API are refused SEPARATELY on this site: the page
     can answer 200 while `/apis/ui/...` behind it is throttled. A run that
     saw that and reported "the listing ended" would claim a complete run
-    while holding page 1 (§7).
+    while holding page 1.
     """
     session._api_errors = 0
 
@@ -396,7 +453,7 @@ def _current_url(session) -> str:
 # The site's own API, asked from inside the page. pyppeteer takes an async
 # ARROW and awaits it, where Selenium takes a function body plus a callback —
 # three spellings of one operation, which is why page_flow names the
-# operation and each engine writes its own (§1).
+# operation and each engine writes its own.
 _FETCH_API_JS = """async ([p, b]) => {
     const opt = (b === null)
         ? {headers: {'Accept': 'application/json'}}
@@ -460,7 +517,7 @@ def _read_tiles(session) -> List[dict]:
     Raw strings only; every judgement about what they MEAN belongs to
     `product_parser.overlay_dom_prices`, so all three engines hand the parser
     the same thing. A tile with no product link is skipped rather than
-    guessed at (§4).
+    guessed at.
     """
     try:
         return session.bridge.run(session.page.evaluate(_READ_TILES_JS),
@@ -482,13 +539,13 @@ def _min_matches(args, html: str = "") -> int:
 
 def _classify(session, html: str, status=None) -> str:
     # `status` POSITIONAL and second, matching the other two engines and the
-    # callee's real signature (§17).
+    # callee's real signature.
     return page_flow.classify(html, status, _current_url(session))
 
 
 def _rows_from_payload(payload, args, page_num: int, data_source: str) -> List:
     """Rows for this page, always a list. `page_num` is threaded through
-    because `position` restarts at 1 on every page (§18)."""
+    because `position` restarts at 1 on every page."""
     return products_from_payload(payload, page=page_num,
                                  data_source=data_source, host=CANONICAL_HOST)
 
@@ -514,7 +571,7 @@ def handle_captcha_if_present(session, args, allow_solve: bool = True,
     # DETECTION is broad and unconditional; SOLVING is policy. `allow_solve`
     # comes from `page_flow.should_solve(state)`, which is False for every
     # state on this site because Akamai's denial here carries no widget for
-    # a solver to answer (section 19). Detecting and then saying so is the
+    # a solver to answer. Detecting and then saying so is the
     # point: a challenge nobody logged is a silent zero months later.
     if not allow_solve:
         logger.warning(
@@ -540,10 +597,11 @@ def handle_captcha_if_present(session, args, allow_solve: bool = True,
                        "solved — continuing with whatever the page holds.")
         return False
     # The budget is charged HERE, immediately before the money is spent,
-    # and not after the solver returns: a failed solve is still billed
-    # (§19). One call site in this engine, inside the block-retry loop —
-    # so without this a page retried four times would buy four solves the
-    # day `page_flow.should_solve` starts returning True.
+    # and not after the solver returns: a failed solve is still billed.
+    # `page_flow.fetch_one_page` calls this once per page, after its
+    # block-retry loop, with a budget made for that page; any second call
+    # site added later (or a retry that reached this) still meets the same
+    # per-page allowance instead of buying another solve.
     if budget is not None and not budget.charge():
         logger.warning(
             "%s detected via %s, but this page has already spent its "
@@ -580,11 +638,11 @@ API_ERRORS = (PyppeteerError, PPTimeout, TimeoutError)
 # ===========================================================================
 # The driver primitives the shared loop asks for
 # ===========================================================================
-# `page_flow.fetch_one_page` is ONE implementation for all three engines
-# (§27.5); this class is the only part of it that is pyppeteer's. Every
+# `page_flow.fetch_one_page` is ONE implementation for all three engines;
+# this class is the only part of it that is pyppeteer's. Every
 # method is either a driver call or a two-line adapter, and no JavaScript
 # crosses the boundary in either direction — the shared module names the
-# OPERATION and this spells it in pyppeteer's dialect (§1).
+# OPERATION and this spells it in pyppeteer's dialect.
 #
 # `smoke_test.py` derives the required method set from page_flow's own AST
 # rather than from a hand-written list, so the day the loop reaches for a
@@ -681,7 +739,7 @@ def _honour_store_request(session, args, pool):
     The refusal is the point. Accepting `--store-id` and then scraping
     whatever store the session happens to have, with the requested number
     stamped on every row, would produce a file that is real in every cell
-    and wrong in the one that matters (§8: never present a guess as a
+    and wrong in the one that matters (never present a guess as a
     fact). So the request is MADE, the session's own store is read before
     and after, and a run that did not get what it asked for stops.
     """
@@ -691,6 +749,15 @@ def _honour_store_request(session, args, pool):
 
     landing = page_flow.PageOutcome(page_num=1, url=args.url)
     html, _status, state = page_flow.land(ops, args, landing)
+    if landing.load_failed and not page_flow.counts_as_blocked(state):
+        # No document came back (timeout or a failed exit): content not
+        # obtained, exit 5 — not a refusal, so no exit is advised.
+        landing.state = state
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=False,
+            stop_reason=page_flow.stop_reason_for(landing),
+            pages_requested=1, pages_completed=0, start_url=args.url,
+            final_url=args.url, mode=args.mode)
     if page_flow.counts_as_blocked(state):
         logger.error("The landing page was refused, so the store request "
                      "could not even be made. %s", page_flow.block_advice(
@@ -722,7 +789,7 @@ def _run_store_lookup(session, args, pool) -> int:
     Kept apart from the listing path on purpose: there is no pagination,
     no DOM to read, no tiles to wait for and no price to confirm, so
     routing it through `fetch_one_page` would mean five branches that are
-    False for every store run (§"a branch keyed on a mode that does not
+    False for every store run ("a branch keyed on a mode that does not
     exist" — four dead branches per engine is a real cost this family has
     already paid).
     """
@@ -732,6 +799,15 @@ def _run_store_lookup(session, args, pool) -> int:
 
     landing = page_flow.PageOutcome(page_num=1, url=args.url)
     html, _status, state = page_flow.land(ops, args, landing)
+    if landing.load_failed and not page_flow.counts_as_blocked(state):
+        # No document came back (timeout or a failed exit): content not
+        # obtained, exit 5 — not a refusal, so no exit is advised.
+        landing.state = state
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=False,
+            stop_reason=page_flow.stop_reason_for(landing),
+            pages_requested=1, pages_completed=0, start_url=args.url,
+            final_url=args.url, mode=args.mode)
     if page_flow.counts_as_blocked(state):
         logger.error("The landing page was refused, so the locator cannot "
                      "be asked: a store lookup is a request made from "
@@ -820,8 +896,7 @@ def scrape(args) -> int:
         outcomes.append(first)
 
         if not first.ok:
-            stop_reason = ("page_load_timeout" if first.load_failed
-                           else f"blocked_{first.blocked_by}")
+            stop_reason = page_flow.stop_reason_for(first)
             blocked = first.blocked_by is not None
         else:
             seen_keys.update(p.sku for p in first.products if p.sku is not None)
@@ -839,13 +914,12 @@ def scrape(args) -> int:
                     out = _fetch_one_page(session, args, pool, page_num, args.url)
                     outcomes.append(out)
                     if not out.ok:
-                        stop_reason = ("page_load_timeout" if out.load_failed
-                                       else f"blocked_{out.blocked_by}")
+                        stop_reason = page_flow.stop_reason_for(out)
                         blocked = blocked or out.blocked_by is not None
                         break
                     # ORGANIC rows, not rows: past its last real page this
                     # API keeps answering 200 with nothing but the same
-                    # promoted ads page 1 carried (§7).
+                    # promoted ads page 1 carried.
                     turn = page_flow.advance_page(out.products, seen_keys)
                     seen_keys.update(p.sku for p in out.products
                                      if p.sku is not None)
@@ -869,7 +943,7 @@ def scrape(args) -> int:
         # crash.
         bridge.close()
 
-    # Merge in PAGE ORDER, not arrival order (§8).
+    # Merge in PAGE ORDER, not arrival order.
     all_rows = []
     seen = set()
     for outcome in sorted(outcomes, key=lambda o: o.page_num):
@@ -932,21 +1006,21 @@ def parse_args():
     p.add_argument("--category", default=None,
                    help="Label to tag output rows with. Filled from the URL "
                         "by default.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_flag, default=1,
                    help=f"Number of pages to walk (default 1, cap {PAGE_CAP}). "
                         f"The walk stops when a page adds no ORGANIC product "
                         f"it has not already seen — never when a page comes "
                         f"back empty, because past its last real page this "
                         f"listing keeps answering 200 with nothing but ads.")
-    p.add_argument("--delay", type=float, default=2.0,
+    p.add_argument("--delay", type=page_flow.delay_flag, default=2.0,
                    help="Delay between pages, seconds (default 2.0).")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--concurrency", type=page_flow.concurrency_flag, default=1, metavar="N",
                    help="Accepted for family compatibility and NOT "
                         "IMPLEMENTED in this engine. Use "
                         "playwright_scraper.py, where it works.")
     p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3).")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_flag, default=2.0,
                    help="Seconds before the first retry (default 2.0).")
     p.add_argument("--format", choices=["json", "csv", "both"], default="json",
                    help="Output format (default json).")
@@ -964,7 +1038,7 @@ def parse_args():
                    help="When to move to the next exit (default per-run).")
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool before use.")
-    p.add_argument("--proxy-block-retries", type=int, default=4, metavar="N",
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_flag, default=4, metavar="N",
                    help="How many EXTRA attempts to make when a page comes "
                         "back refused, each on the next exit (default 4, "
                         "and only with a pool). It is a count of RETRIES, "
@@ -1038,6 +1112,10 @@ def parse_args():
                    help="Run headless. Measured 0/4 served on this site from "
                         "a datacentre address. Expect exit 3.")
     args = p.parse_args(page_flow.join_near_argument(sys.argv[1:]))
+    # What the user TYPED is kept apart from what .env supplies: a copied
+    # .env.example sets WOOLWORTHS_URL, and reading that as a typed --url
+    # turned `--postcode 3000` into a search-listing run.
+    typed_url = args.url
     env_config.apply(args)
     if not args.url and not (args.mode == "stores" or any(
             getattr(args, n, None)
@@ -1055,7 +1133,7 @@ def parse_args():
     # and the user does not have to think about it.
     _store_lookup = any(getattr(args, n, None)
                         for n in ("postcode", "suburb", "near", "store_id"))
-    if args.mode == "stores" or (_store_lookup and args.url is None):
+    if args.mode == "stores" or (_store_lookup and typed_url is None):
         args.mode = "stores"
         if args.near:
             parts = [x.strip() for x in str(args.near).split(",")]
@@ -1071,7 +1149,7 @@ def parse_args():
         problem = page_flow.store_lookup_problem(args)
         if problem:
             p.error(problem)
-        args.url = args.url or STORE_LANDING_URL
+        args.url = typed_url or STORE_LANDING_URL
         args.category = args.category or (
             args.postcode or args.suburb or args.near or args.store_id)
         args.page_size = PAGE_SIZE
@@ -1090,7 +1168,7 @@ def parse_args():
     # Not silently ignored and not silently honoured. The attempt is made
     # at run time in `scrape`, against the live site, so what the reader
     # gets is the status the site returned today rather than a sentence
-    # written here months ago (section 13).
+    # written here months ago.
     if args.suburb or args.near:
         p.error("--suburb and --near only apply to --mode stores. A "
                 "listing is priced by a store, not by an area.")

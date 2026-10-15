@@ -2,7 +2,7 @@
 
 Woolworths answers a request three ways, and two of them want a different
 response, which is why this module exists rather than the same triage being
-written three times inside three engines and drifting apart (§1):
+written three times inside three engines and drifting apart:
 
     content    the shell is up and the grid's tiles have rendered
     shell      served, built out of Woolworths' own assets, nothing painted
@@ -30,7 +30,7 @@ afterwards over the site's own API. So unlike a sibling repo whose site ships
 its data in the document, a run here ALWAYS waits, and `shell` classifying as
 "retry this" would refetch a page that was served perfectly well.
 
-This is §18's finding — that which of the three missing-content cases applies
+This is the finding — that which of the three missing-content cases applies
 can differ between page kinds — arriving as a property of the whole site
 rather than of one route.
 
@@ -51,7 +51,7 @@ passes its own driver's primitives and keeps its browser plumbing to itself:
     fetch_json(kind, params) -> dict    ask the site's own API
     read_tiles() -> List[dict]          the rendered tiles, shadow roots and all
 
-No JavaScript crosses that boundary in either direction (§1): Selenium's
+No JavaScript crosses that boundary in either direction: Selenium's
 `execute_script` takes a function BODY with an explicit `return` where
 Playwright and pyppeteer take `() => expr`, so this module names the
 OPERATION and each engine spells it in its own driver's dialect.
@@ -89,7 +89,7 @@ from product_parser import (API_CATEGORIES_PATH, API_FULFILMENT_PATH,
 logger = logging.getLogger("page_flow")
 
 # `user:pass@` inside a URL anywhere in a string. An EXCEPTION MESSAGE is a
-# log (§8), and a driver error carries the full proxy URL it failed to
+# log, and a driver error carries the full proxy URL it failed to
 # reach. GLOBAL rather than first-match: an error can repeat an endpoint
 # several times, and a masker that handles one occurrence prints the
 # password for the rest while looking like it works.
@@ -125,7 +125,7 @@ def ready_selector(mode: str = "") -> str:
 
 
 def min_matches(mode: str = "", expected: Optional[int] = None) -> int:
-    """How many tiles mean "painted". Never 1 (§5)."""
+    """How many tiles mean "painted". Never 1."""
     if expected is not None and expected > 0:
         return max(2, min(MIN_CARD_MATCHES, expected))
     return MIN_CARD_MATCHES
@@ -137,7 +137,7 @@ def wait_for_tiles(count: Callable[[str], int], sleep: Callable[[int], None],
                    timeout_ms: int = CONTENT_TIMEOUT_MS) -> int:
     """Poll until the grid has painted, or the budget runs out. Returns the count.
 
-    POLLS rather than evaluating a wait expression. §18's Tokopedia finding
+    POLLS rather than evaluating a wait expression. the Tokopedia finding
     was a site whose Content-Security-Policy has no `unsafe-eval`, which made
     Playwright's `wait_for_function` — a STRING handed to the browser to
     evaluate — kill the run with an EvalError on the site's most obvious URL.
@@ -171,7 +171,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     """Which of the four states this response is in.
 
     Signature note: `status` is positional-or-keyword and SECOND, and every
-    engine calls it the same way. §17's check-worth-stealing #1 exists
+    engine calls it the same way. The first check worth stealing exists
     because a sibling repo had `classify(html, status, url)` called as
     `classify(html, url=…)` in two of three engines, and both crashed on
     their first fetch.
@@ -192,13 +192,20 @@ STATE_POLICY: Dict[str, Dict[str, bool]] = {
     # Retried, because it is address-shaped rather than page-shaped and a
     # rotation is what clears it — see `block_advice` for what was measured.
     # NOT solved: Akamai renders no widget on this site's denial. That is a
-    # statement about THIS PAGE and not about what any solver can do (§19) —
+    # statement about THIS PAGE and not about what any solver can do —
     # the denial page is 400 bytes of plain HTML with no captcha of any kind
     # in it, so there is nothing for a solver at any price to work on. If
     # Woolworths ever serves an interstitial that carries a widget,
     # `captcha_solver.py` already knows reCAPTCHA v2/v3, enterprise reCAPTCHA
     # and Turnstile, and this flag is the line to change.
     "blocked":   {"retry": True,  "solve": False, "blocked": True},
+    # The navigation itself failed: every attempt timed out or raised, and
+    # no document came back. Content NOT OBTAINED (exit 5), not a refusal:
+    # there is no page to say the site refused anything.
+    "unreachable":  {"retry": True, "solve": False, "blocked": False},
+    # The exit failed (dead, unauthenticated or mistyped proxy). Also no
+    # document, also exit 5. Retried because the next exit may work.
+    "proxy_failed": {"retry": True, "solve": False, "blocked": False},
     # Not one of ours.
     "unknown":   {"retry": True,  "solve": False, "blocked": False},
 }
@@ -223,7 +230,7 @@ def should_solve(state: str) -> bool:
     False everywhere on this site, and that is about THIS PAGE rather than
     about any solver: Akamai's denial here is ~400 bytes of plain HTML with
     no widget of any kind on it, so there is nothing for a solver at any
-    price to answer (section 19). Consulted anyway, by every engine, so that
+    price to answer. Consulted anyway, by every engine, so that
     changing the policy here is all it takes if Woolworths ever serves an
     interstitial that does carry one.
     """
@@ -234,24 +241,41 @@ def counts_as_blocked(state: str) -> bool:
     return _policy(state)["blocked"]
 
 
+def stop_reason_for(outcome) -> str:
+    """Why the walk stopped on a page that was not ok, named by what
+    actually went wrong. Shared so the three engines cannot disagree.
+
+    `parser_found_nothing` is not a complete reason: the site said it held
+    results and none were produced. A load failure is `page_load_timeout`
+    or `proxy_failed`, never `blocked_*`: no document came back.
+    """
+    if getattr(outcome, "parse_failed", False):
+        return "parser_found_nothing"
+    if outcome.blocked_by is not None:
+        return f"blocked_{outcome.blocked_by}"
+    if outcome.state == "proxy_failed":
+        return "proxy_failed"
+    return "page_load_timeout"
+
+
 # ===========================================================================
 # Retry budget and advice
 # ===========================================================================
 # Consulted by all three engines — not a constant that reads like enforcement
-# and enforces nothing (§17). `smoke_test.py` asserts each of these has a
+# and enforces nothing. `smoke_test.py` asserts each of these has a
 # consumer outside this module.
 # How many solves ONE PAGE may buy, across every attempt at it.
 #
 # Zero are bought on this site today: `should_solve` is False for every
 # state, because Akamai's denial here carries no widget (see above). The cap
-# exists anyway, and it is not decoration — §23 measured a sibling repo
+# exists anyway, and it is not decoration — a family note measured a sibling repo
 # buying THREE Turnstile solves for one page against a `SOLVES_PER_PAGE = 1`
-# that nothing consulted, and §27.4 then measured the same bypass in 33 of
+# that nothing consulted, and a family-wide audit then measured the same bypass in 33 of
 # the 39 family repos that have a solve path at all.
 #
 # The shape of that bug is the reason this is an OBJECT rather than an
 # integer. A bare constant beside a comment reads like enforcement and
-# enforces nothing (§17), and a budget consulted at one of two call sites is
+# enforces nothing, and a budget consulted at one of two call sites is
 # the same defect wearing a number. There is one call site per engine here;
 # it sits INSIDE the block-retry loop, so without a cap a page retried four
 # times would buy four solves the moment the policy flag changed.
@@ -262,7 +286,7 @@ class SolveBudget:
     """What one page is allowed to spend, counted where the money goes.
 
     Charged immediately before the solver is called rather than after it
-    returns, because a FAILED solve is still billed — §19 records an
+    returns, because a FAILED solve is still billed — a family note records an
     `ERROR_CAPTCHA_UNSOLVABLE` that cost real money after 87 seconds. A
     budget that only counts successes is a budget that cannot be exceeded
     on paper while the bill says otherwise.
@@ -291,7 +315,7 @@ class SolveBudget:
 
 BLOCK_RETRIES_WITHOUT_POOL = 3
 BLOCK_RETRIES_WITH_POOL = 4
-# A rotation is a fresh browser (§8): cookies Akamai issued against exit A
+# A rotation is a fresh browser: cookies Akamai issued against exit A
 # and replayed from exit B are a stronger signal than either address alone,
 # and Akamai's session cookies are exactly what this site issues.
 RETRY_NEEDS_FRESH_CONTEXT = True
@@ -302,7 +326,7 @@ def block_retries(has_pool: bool, requested: Optional[int] = None) -> int:
 
     `requested` is `--proxy-block-retries`, and it was being ignored: the
     engines called this with `has_pool` alone, so the flag parsed, defaulted
-    and changed nothing — section 17's "a policy constant nothing reads",
+    and changed nothing — "a policy constant nothing reads",
     wearing a CLI flag. Measured with `--proxy-block-retries 0` and a
     two-exit pool: the run still made every attempt the constant allows.
 
@@ -323,12 +347,15 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
     measured and it is free to act on: from one datacentre address, four
     URLs fetched HEADFUL returned HTTP 200 with the full catalogue and the
     same four fetched HEADLESS returned Akamai's 403 denial. That is the
-    §19 measurement, run on this site rather than inherited.
+    measurement, run on this site rather than inherited.
     """
     bits: List[str] = []
     marker = detect_block_marker(html or "")
     if marker:
         bits.append(f"Akamai refused the request ({marker!r} on the page).")
+    elif not html:
+        bits.append("No document was received, so this is not a measured "
+                    "refusal; check the network before buying anything.")
     else:
         bits.append("The request was refused.")
 
@@ -354,7 +381,7 @@ def block_advice(html: Optional[str], headless: bool, has_pool: bool) -> str:
 # ===========================================================================
 # Both modes address a page by an integer in the request body, so page N can
 # be asked for without reading page N-1 — which is what makes `--concurrency`
-# meaningful here (§7).
+# meaningful here.
 def paginates_by_url(mode: str = "", url: str = "") -> bool:
     return True
 
@@ -426,7 +453,7 @@ def advance_page(rows: Sequence[object], seen_skus: set) -> str:
 
 
 # ===========================================================================
-# The page loop itself — ONE implementation, three drivers (§27.5)
+# The page loop itself — ONE implementation, three drivers
 # ===========================================================================
 # Until 2026-10-08 the loop below lived three times over, once per engine,
 # and the module docstring above already described the design this section
@@ -449,7 +476,7 @@ def advance_page(rows: Sequence[object], seen_skus: set) -> str:
 #   * the check written afterwards to catch that immediately found a SECOND
 #     divergence of the same shape, in `_read_tiles`.
 #
-# CLAUDE.md §27.5 says to convert the repos where a divergence has actually
+# A family note says to convert the repos where a divergence has actually
 # bitten. This is one, twice.
 #
 # WHAT AN ENGINE STILL OWNS: launching and tearing down a browser, its own
@@ -522,7 +549,7 @@ class PageOutcome:
     stated_total: Optional[int] = None
     # None, always, on this site: Woolworths numbers no rank on a listing,
     # so there is no arithmetic gap to compute, and an unknown gap must not
-    # read the same as a gap of zero (§8).
+    # read the same as a gap of zero.
     gap: Optional[int] = None
     # What the DOM cross-check found: how many rows had a rendered tile to
     # compare against and how many agreed. None where no tile was readable.
@@ -540,7 +567,7 @@ class PageOutcome:
     # so this is ours rather than the network's, and the log says so — but
     # it must not count as a completed page.
     #
-    # This was an audit's P1 and it is the family defect §26 records binance
+    # This was an audit's P1 and it is the family defect a family note records binance
     # hitting for real. The state was being SET and then discarded: `ok`
     # consulted only the two fields below, so a parser failure came back as
     # a page that succeeded with zero rows, which `advance_page` then read
@@ -559,7 +586,7 @@ class PageOutcome:
 # Not an ABC and not type-checked at runtime: `smoke_test.py` derives the
 # required set from THIS MODULE'S OWN AST — every `ops.<name>` the loop
 # reaches for — and asserts each engine provides all of them. A hand-written
-# list would drift the day the loop uses a new one, which is §26's check #1
+# list would drift the day the loop uses a new one, which is the first check
 # and the reason it is worth copying with the pattern.
 #
 #   goto(url, timeout_ms) -> Optional[int]   navigate; the HTTP status, or
@@ -598,7 +625,7 @@ def land(ops, args, outcome: PageOutcome):
     Selenium reports no HTTP status, so `status` is None there and
     `detect_page_state` falls through to the markers and the asset-host
     signal. That is the one place that engine has strictly less information
-    than its twins, and it is why the asset-host check exists (§8).
+    than its twins, and it is why the asset-host check exists.
     """
     if ops.is_landed(args.url) and ops.is_live():
         # CLASSIFIED, not assumed to be content. Two of the three engines
@@ -625,18 +652,21 @@ def land(ops, args, outcome: PageOutcome):
             # error (net::ERR_PROXY_CONNECTION_FAILED), not a timeout —
             # catching only the latter lets it escape as a traceback, which
             # is the likeliest failure the first time anyone points
-            # --proxy-file at a real list (§8). They want opposite
+            # --proxy-file at a real list. They want opposite
             # responses: a timeout deserves another try at the same exit, a
             # dead proxy a different one.
             reason = ops.proxy_failure(e)
             if reason:
+                # NOT "blocked": no document came back, so nothing was
+                # refused. Reporting it as a block exited 3 and advised
+                # buying an exit for what was a dead or mistyped proxy.
                 logger.error("Exit failed: %s", reason)
                 outcome.load_failed = True
-                return None, None, "blocked"
+                return None, None, "proxy_failed"
             if attempt < args.retries:
                 pause = args.retry_delay * (2 ** (attempt - 1))
                 # MASKED: the driver puts the proxy URL it could not reach
-                # into the exception text, credentials and all (§8).
+                # into the exception text, credentials and all.
                 logger.warning("Could not load %s (attempt %d/%d: %s) — "
                                "retrying in %.1fs.", args.url, attempt,
                                args.retries,
@@ -644,7 +674,7 @@ def land(ops, args, outcome: PageOutcome):
                 time.sleep(pause)
             else:
                 outcome.load_failed = True
-                return None, None, "blocked"
+                return None, None, "unreachable"
 
     html = ops.document_text() or ""
     state = ops.classify(html, status)
@@ -747,7 +777,7 @@ def confirm_with_dom(ops, rows, page_num: int) -> Optional[dict]:
 
     A CONFIRMATION, never a correction: where the two agree the row's
     `price_source` becomes `api+dom`, and where they disagree the row is
-    left exactly as the API gave it and a warning names the sku (§4).
+    left exactly as the API gave it and a warning names the sku.
 
     Only meaningful for the page the browser is actually LOOKING at, which
     is page 1 — pages 2..N are fetched over the API without navigating, so
@@ -826,13 +856,13 @@ def fetch_one_page(ops, args, pool, page_num: int,
         html, status, state = land(ops, args, outcome)
 
         # The POLICY decides whether another fetch could change this answer,
-        # rather than each engine deciding for itself (§1). False for
+        # rather than each engine deciding for itself. False for
         # content, shell and empty; True for blocked and unknown.
         if not should_retry(state) and not outcome.load_failed:
             break
 
         if block_attempt < block_retries_left:
-            # A rotation is a FRESH BROWSER (§8). Cookies Akamai issued
+            # A rotation is a FRESH BROWSER. Cookies Akamai issued
             # against exit A and replayed from exit B are a stronger signal
             # than either address alone, and Akamai session cookies are
             # exactly what this site issues.
@@ -857,7 +887,7 @@ def fetch_one_page(ops, args, pool, page_num: int,
             time.sleep(args.retry_delay)
 
     # Detection runs on every page, whatever the state — a challenge that
-    # nobody recognises becomes an empty category months later (§8). Whether
+    # nobody recognises becomes an empty category months later. Whether
     # a SOLVE may be bought is this module's call, and the budget is this
     # page's, so a retried page cannot buy a second one.
     try:
@@ -871,7 +901,14 @@ def fetch_one_page(ops, args, pool, page_num: int,
 
     outcome.state = state
 
-    if outcome.load_failed and state != "blocked":
+    if outcome.load_failed and not counts_as_blocked(state):
+        logger.error(
+            "No document was received for page %d (%s): %s. That is not a "
+            "refusal — the content was not obtained (exit 5 when nothing "
+            "else was read). Check the network or the exit before anything "
+            "else.", page_num, state,
+            "the proxy failed" if state == "proxy_failed"
+            else f"{args.retries} navigation attempt(s) failed")
         outcome.final_url = ops.current_url() or args.url
         return outcome
 
@@ -938,7 +975,7 @@ def fetch_one_page(ops, args, pool, page_num: int,
         # An API refusal is NOT the end of the listing, and must not be
         # reported as one: the document answers 200 while the API behind it
         # is throttled, so a run that collapsed the two would claim a
-        # complete run holding page 1 (§7).
+        # complete run holding page 1.
         logger.error(
             "POST %s for page %d answered HTTP %s with %d byte(s) that %s "
             "JSON. This is not the end of the listing — the run is reported "
@@ -1013,7 +1050,7 @@ def fetch_one_page(ops, args, pool, page_num: int,
     elif stated == 0:
         # A genuinely empty listing, and the site says so itself. NOT a
         # parser problem, and saying so matters: the two want different
-        # readers doing different things (§20). The run still reports exit 4
+        # readers doing different things. The run still reports exit 4
         # — the catalogue question was answered and the answer was nothing —
         # but nothing is dumped and nobody is sent to debug a read that
         # worked.
@@ -1024,7 +1061,7 @@ def fetch_one_page(ops, args, pool, page_num: int,
         outcome.state = "empty"
     else:
         # The site said it HAS results and the parser produced none. That is
-        # ours, and it is the case §20 asks to be named rather than reported
+        # ours, and it is the case a family note asks to be named rather than reported
         # as "0 products", which sends the reader to check the URL instead
         # of the payload.
         debug_html = f"{args.out}_page{page_num}_debug.html"
@@ -1062,7 +1099,7 @@ def fetch_one_page(ops, args, pool, page_num: int,
 # So this module does the lookup properly and, for a listing run, REFUSES to
 # pretend. The alternative — accept `--store-id`, scrape the default store
 # and stamp the requested number on every row — is the exact shape of
-# "never present a guess as a fact" (§8), and it would be invisible: the
+# "never present a guess as a fact", and it would be invisible: the
 # rows would be real, the prices would be real, and they would belong to a
 # different store than the file says.
 
@@ -1111,7 +1148,7 @@ def fetch_stores(ops, args) -> PageOutcome:
         # An impossible postcode was already refused above, so reaching here
         # means the site really has nothing. Saying WHICH it is matters:
         # the locator answers a typo with the same HTTP 200 and the same
-        # empty list (§26), and without the check above a typo would read
+        # empty list, and without the check above a typo would read
         # as "Woolworths does not serve that area".
         logger.info(
             "The store locator returned no store for this %s. The lookup "
@@ -1168,7 +1205,7 @@ def store_selection_problem(args, served_before, served_after) -> Optional[str]:
     `--store-id`/`--postcode` on a LISTING run asks for prices from a
     particular store. The attempt is made rather than assumed — the status
     the site returns today is a fact, and a sentence in this file would be
-    an inheritance (§13) — and if the session's store did not change, the
+    an inheritance — and if the session's store did not change, the
     run is refused instead of returning another store's prices under the
     requested store's name.
     """
@@ -1200,10 +1237,10 @@ def store_selection_problem(args, served_before, served_after) -> Optional[str]:
 # only when the next token parses as a coordinate pair, so no other
 # negative-looking argument can be swallowed by accident.
 #
-# HERE rather than in the engines for the reason §27.5 gives: it is
+# HERE rather than in the engines for the reason a family note gives: it is
 # identical in all three, it needs no driver, and a check that has to
 # import an engine to reach it is a check that goes quiet in exactly the
-# environment where it matters (§27.4). This one is reachable with nothing
+# environment where it matters. This one is reachable with nothing
 # installed at all.
 _COORD_PAIR_RE = re.compile(r"^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$")
 
@@ -1245,9 +1282,9 @@ def request_store(ops, args) -> dict:
     """Ask the site to price this listing from a particular store.
 
     ATTEMPTED, not assumed. What the site answers today is a fact; a
-    sentence written in this file would be an inheritance (§13), and the
+    sentence written in this file would be an inheritance, and the
     one thing this family has learned about capability claims is that they
-    rot silently (§19). So the run makes the call, reads the session's
+    rot silently. So the run makes the call, reads the session's
     store before and after, and reports what actually happened.
 
     Returns a dict for the sidecar. The caller decides whether to continue.
@@ -1302,6 +1339,35 @@ def request_store(ops, args) -> dict:
 # --retries
 # ---------------------------------------------------------------------------
 import argparse as _argparse  # noqa: E402  (kept beside its only user)
+
+
+def _number_flag(flag: str, cast, least, what: str):
+    """An argparse `type=` that names the flag and rejects values below
+    `least` with exit 2, before any browser starts."""
+    def convert(value):
+        try:
+            number = cast(value)
+        except (TypeError, ValueError):
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be {what}, not {value!r}")
+        if number != number or number < least:      # NaN fails both ways
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be at least {least}, not {value}")
+        return number
+    convert.__name__ = flag.lstrip("-").replace("-", "_")
+    return convert
+
+
+# --pages 0 and --pages -2 used to run one page and report `complete`;
+# --delay -1 crashed in time.sleep after page 1 with its rows unsaved;
+# --concurrency 0 meant nothing defined. Each is now a usage error.
+pages_flag = _number_flag("--pages", int, 1, "an integer")
+concurrency_flag = _number_flag("--concurrency", int, 1, "an integer")
+delay_flag = _number_flag("--delay", float, 0, "a number of seconds")
+retry_delay_flag = _number_flag("--retry-delay", float, 0,
+                                "a number of seconds")
+block_retries_flag = _number_flag("--proxy-block-retries", int, 0,
+                                  "an integer")
 
 
 def attempts(value) -> int:

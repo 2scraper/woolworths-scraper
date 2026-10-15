@@ -35,6 +35,13 @@ _*.py
 *_debug.html
 *_debug.png
 *.html.page*
+# `--dump-html X --pages N` writes X.pageN (and X.pageN.api.json) whatever X
+# is called, so the page suffix is matched on its own, not only after .html.
+*.page[0-9]*
+# Any HTML at the top level is a capture or a dump; nothing shipped is one.
+/*.html
+# A live-capture working directory, by the name these tools use for it.
+live/
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
@@ -84,7 +91,7 @@ secrets*
 # recoverable only because that repo was private at the time. On 2026-09-17
 # a sibling had an untracked `.env.bak` holding a 32-hex key in a PUBLIC
 # repository, one `git add -A` from publication. Craigslist was fixed then
-# and the fix never reached anyone else, which is §16's rule unapplied: when
+# and the fix never reached anyone else, which is the rule unapplied: when
 # you fix one, check the siblings.
 .env*
 !.env.example

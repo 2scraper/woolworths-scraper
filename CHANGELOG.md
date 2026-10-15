@@ -11,6 +11,33 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+> **Behaviour change — exit codes.** A page whose navigation never returned
+> a document (every attempt timed out, or the proxy failed) now exits **5**
+> ("content not obtained") with `stop_reason` `page_load_timeout` or
+> `proxy_failed`. It used to exit **3** ("blocked") and advise buying an
+> exit, although nothing had been refused. A real Akamai denial is still 3.
+>
+> **Behaviour change — concurrent runs.** With `--concurrency`, a page whose
+> worker raised is now listed in `pages_failed`, and pages no worker reached
+> (for example because the worker browsers never launched) are listed in a new
+> `pages_unattempted` sidecar field. Either makes the run `partial`, exit 6.
+> Both cases used to report `complete`, exit 0.
+>
+> **Behaviour change — rejected flag values.** `--pages` and `--concurrency`
+> below 1, and `--delay`, `--retry-delay` and `--proxy-block-retries` below
+> 0, are now usage errors (exit 2) in all three engines. `--pages 0` used to
+> fetch one page and report `complete`; `--delay -1` crashed after page 1
+> without saving its rows.
+>
+> **Behaviour change — `.env.example`.** `WOOLWORTHS_URL` is commented out.
+> A copied example used to set it, and the engines then treated it as a
+> typed `--url`: `--postcode 3000` became a search-listing run. The store
+> shortcut now looks only at a URL you typed.
+>
+> **Behaviour change — `diff_runs.py`.** Two `--mode stores` files are now
+> refused (exit 2, also with `--force`). The tool compares product prices,
+> and it used to report "0 changed" for any two store files.
+
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
 > to be accepted and made the page-load loop unreachable, so nothing was
 > fetched and the engine reported the browser's own blank page as a result:
@@ -37,6 +64,34 @@ rather than leaving anyone to discover it from their own output.
   own stockcodes, and logs a WARNING if none ever does. A real two-read
   capture of the bakery page is in the fixtures, with checks that the early
   read matches no row and that the wait reaches the grid.
+- **The pyppeteer engine could not use an authenticated proxy on current
+  Chromium.** `page.authenticate()` needs a CDP method that current Chromium
+  no longer has, and the run crashed before its first navigation. On that
+  error the engine now answers the proxy's challenge through CDP's Fetch
+  domain. Verified headful through a local proxy that requires Basic auth:
+  37 rows, exit 0, where the previous code exited 1. The engine also stopped
+  replacing the browser's user agent with a hardcoded Windows one; it now
+  only turns "HeadlessChrome" into "Chrome" when headless. And `connect()`
+  no longer passes `ignoreHTTPSErrors` to a remote browser.
+- **The credential scan missed JSON files, `.env` backups and whole
+  checkouts.** It now reads `.json`, `.csv`, `.toml`, `.sh`, `.cfg`/`.ini`,
+  the Dockerfile and every `.env*` name except `.env` itself. It also
+  recognises a key-shaped field in its JSON-escaped form. Directory
+  exclusions are judged relative to the repo, so a clone under a parent
+  directory named `venv` no longer scans 0 files and passes. A scan that
+  reads 0 files now fails. The offline suite runs the scan itself.
+- `.gitignore` covers `--dump-html` page files (`X.pageN`), a `live/`
+  capture directory and any top-level HTML file.
+- Documentation no longer says Scraping Browser credentials expire "in about
+  a day". They can expire or be rotated, and a 401 means re-check them.
+  Several comments and docstrings described a different site's modes. They
+  now describe this one.
+- CI tests Python 3.13 as well as 3.9 and 3.12, matching the README badge.
+  The duplicate inline sample check was dropped; `ci_checks.py
+  --sample-check` already runs it.
+- Comments, docstrings and the changelog no longer cite the maintainers'
+  private notes or their section numbers. The suite fails if such a citation
+  comes back.
 
 ## [0.4.0] — 2026-10-08
 
@@ -71,16 +126,16 @@ rather than leaving anyone to discover it from their own output.
   checked by pulling all 88 `${baseApisUrl}` fragments out of the site's own
   bundles. The listing API ignores a store silently as well: seven spellings
   of a store parameter were added to the category body and every one came
-  back HTTP 200 with the same 37 prices (§26's "the API answers wrong values
+  back HTTP 200 with the same 37 prices (the "the API answers wrong values
   with plausible data").
 
   So the run asks the site, reads the session's own `FulfilmentStoreId`
   before and after, and if nothing moved it exits **2 and writes nothing** —
   rather than scraping store 1101 and stamping the requested number on every
   row, which would be a file that is real in every cell and wrong in the one
-  that matters (§8).
+  that matters.
 
-  **This repo does not implement an authenticated session** (§19's wording:
+  **This repo does not implement an authenticated session** (the wording:
   a TODO, not a limitation). Whether an account could set a store is
   untested.
 
@@ -103,13 +158,14 @@ Three things only a live run found, each now pinned by a control:
 - **The `shopper` fixture carries no session id.** A real `SessionId` came
   with the capture; it is replaced with an all-zero placeholder, it is the
   one value in these fixtures that is not verbatim, and the check guards the
-  SHAPE so the next capture is caught too (§10).
+  SHAPE so the next capture is caught too.
 
 ### Note
 
 Four fields the locator returns are deliberately **not** columns:
 `AddressLine2`, `PartnerUrl`, `CategorisedFacilities` and `NearbyPartners`
-were null on 50 of 50 records across three captures. §9 — and the
+were null on 50 of 50 records across three captures. A column that is
+null on every row costs more than it gives, and the
 measurement is written down so someone can add one back with a better one.
 
 ## [0.3.1] — 2026-10-08
@@ -142,7 +198,7 @@ commit message.
 
 ### Changed
 
-- **One fetch loop instead of three** (CLAUDE.md §27.5). The page loop —
+- **One fetch loop instead of three**. The page loop —
   landing, block retries, proxy rotation, the solve budget, classification,
   the readiness wait, target resolution, the API call with its own retry
   budget, the DOM price confirmation, coverage checks and the
@@ -163,7 +219,7 @@ commit message.
   others passed `session`; search mode never reaches that line, so it got
   through a search-only verification and reached main. The check written
   afterwards immediately found a second divergence of the same shape, in
-  `_read_tiles`. §27.5 says to convert the repos where a divergence has
+  `_read_tiles`. A family note says to convert the repos where a divergence has
   actually bitten — this is one, twice.
 
   Net: the engines lost 1,271 lines of triplicated logic, `page_flow`
@@ -189,7 +245,7 @@ right and the other two not:
   masker was three identical copies and only Selenium actually called it on
   the load-failure path, so the same unusable exit leaked its credentials
   from Playwright and pyppeteer. One definition, called in the one place
-  that logs a driver error (§8: an exception message is a log).
+  that logs a driver error (an exception message is a log).
 - **`landed_url` existed only once something had assigned it.** No session
   class declared it; it was created by the first write from outside. It now
   has a declaration and a comment in all three.
@@ -200,14 +256,14 @@ right and the other two not:
   the required set is derived from `page_flow`'s own AST, never from a list
   someone keeps up to date, so the day the loop reaches for a new operation
   every engine missing it fails by name. Instance attributes assigned in
-  `__init__` count, including the tuple form (§26 records the first version
+  `__init__` count, including the tuple form (a family note records the first version
   of this check elsewhere missing those and reporting false positives).
 
   It reads the engines **off disk, with no import** — which is the point,
   and was wrong first time round. Written against the imported modules it
   skipped for every engine whose driver is absent, so it covered one engine
   of three locally and **zero in the offline CI job**, where it then failed
-  on its own "nothing was scanned" guard. §27.4 records exactly this trap
+  on its own "nothing was scanned" guard. A family note records exactly this trap
   in exactly this kind of check. The suite now also runs in a bare
   requirements-only venv locally, which is what CI's offline job is and
   what would have caught it before the push.
@@ -243,7 +299,7 @@ right and the other two not:
 
   `hackernews-scraper` had already solved both: an existing file keeps its
   own mode, and a new one gets `0o666 & ~umask` — exactly what
-  `open(path, "w")` would have given it. Lifted verbatim. CLAUDE.md §16 says
+  `open(path, "w")` would have given it. Lifted verbatim. A family note says
   to lift the sibling's fix rather than invent a second one, and this is
   what inventing one costs: a variant that passes every check written for it
   and is wrong on the umask nobody tested with.
@@ -302,8 +358,8 @@ right and the other two not:
   Nothing is bought on this site today: `should_solve` is False for every
   state, because Akamai's denial here is ~400 bytes with no widget on it.
   This guards the day that changes, which is the only day it is expensive.
-  CLAUDE.md §23 measured a sibling buying three Turnstile solves for one
-  page against a `SOLVES_PER_PAGE = 1` that nothing read, and §27.4 then
+  A family note measured a sibling buying three Turnstile solves for one
+  page against a `SOLVES_PER_PAGE = 1` that nothing read, and a family-wide audit then
   found the same bypass in 33 of the 39 family repos with a solve path.
 - **`csv_cells_escaped` in the run sidecar**, so the divergence between the
   CSV and the JSON is declared rather than discovered as a stray
@@ -337,7 +393,7 @@ right and the other two not:
   commit, and invisible to the person deciding whether running that is safe.
   `.env*` with `!.env.example`, so the documented example stays tracked.
   This landed in #5 on 2026-09-17 and was recorded in no release section
-  until now; CLAUDE.md §22 has the two occasions the family paid for it.
+  until now; a family note has the two occasions the family paid for it.
 - **The exit-code commentary in `output_writer.py` described another site.**
   It listed a `/p/<slug>` discovery hub, "no stories", an Indonesian
   no-results string and a refusal that resets the HTTP/2 stream — none of
@@ -353,7 +409,7 @@ right and the other two not:
   listing. Reproduced with a renamed payload container: exit 0, `complete`,
   `pagination_exhausted`, `pages_failed: []`. Now exit 6, `partial`,
   `stop_reason: parser_found_nothing`, the page listed by number, and the
-  rows already gathered kept. This is the defect CLAUDE.md §26 records
+  rows already gathered kept. This is the defect a family note records
   binance-scraper hitting for real.
 - **`pool.advance(reason)`, not `pool.rotate()`** — see the note above. The
   reason is required, and a first fix that called `pool.advance()` swapped
@@ -414,7 +470,7 @@ right and the other two not:
 
   Measured 2026-10-08 on a bare runner with no secret of any kind: Azure
   `westus3`, headful under Xvfb, **109 rows, `status: complete`, exit 0,
-  every assertion passed**. §§21/24: a canary that can pass without a
+  every assertion passed**. A canary that can pass without a
   credential must never be gated on one. A secret is still used where one
   is set, through the environment rather than a command line.
 

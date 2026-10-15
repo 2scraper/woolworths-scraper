@@ -348,8 +348,8 @@ Browser allows one live connection per profile.
 | `2` | bad usage |
 | `3` | blocked — Akamai refused. Distinct from "found nothing". |
 | `4` | zero products |
-| `5` | remote API error |
-| `6` | partial — some page failed; `pages_failed` in the sidecar says which |
+| `5` | no rows, and the content was not obtained — a navigation timeout, a failed proxy, an API error, or a listing that states results the parser could not read |
+| `6` | partial — some page failed or was never reached; `pages_failed` and `pages_unattempted` in the sidecar say which |
 
 **A run that finds nothing writes nothing**, so last night's good output
 survives a bad night. `--allow-empty` opts out. Every run writes
@@ -359,7 +359,8 @@ failed by number, `dom_confirm`, `sponsored_rows` and
 
 `diff_runs.py` compares two runs by `sku` and refuses to compare runs that
 are not both `complete`, because a partial run's unfetched pages would
-otherwise read as delisted products.
+otherwise read as delisted products. It compares product listings only, and
+refuses two `--mode stores` files.
 
 ---
 

@@ -15,7 +15,7 @@ one country: `woolworths.co.nz` is Woolworths New Zealand (a different
 company on a different platform) and `woolworths.co.za` is Woolworths
 Holdings in South Africa (an unrelated retailer sharing the name). A flag
 could only ever disagree with the URL it was given, and this repo refuses
-both hosts by name and with the reason (§5).
+both hosts by name and with the reason.
 
 WHAT IS DIFFERENT ABOUT THIS SITE
 ---------------------------------
@@ -24,7 +24,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
   headful was served HTTP 200 and the full catalogue **4 of 4**; headless got
   Akamai's 403 "Access Denied" page **4 of 4**. So this engine defaults to
   headful, and `--headless` is available for a reader who has an address
-  where it works. This is §19's "measure it once per site; it is four runs"
+  where it works. This is the "measure it once per site; it is four runs"
   run on this site rather than inherited.
 
 * **There is no product data in the HTML. None.** A served category page is
@@ -55,7 +55,7 @@ WHAT IS DIFFERENT ABOUT THIS SITE
 * **`akamai` is on every page the site SERVES and on neither page it
   refuses** — 1 occurrence on each of six good captures, 0 on both denials.
   It is not a block marker here despite Woolworths being fronted by Akamai,
-  which is §18's rule catching a marker that looks obviously right.
+  which is the rule catching a marker that looks obviously right.
 
 USAGE
 
@@ -124,7 +124,7 @@ DEFAULT_BROWSER_CHANNEL = None
 
 # The ONE launch flag this site actually requires, and the measurement that
 # put it here — because without it the run still "works", which is the worst
-# shape of failure this family knows (§16).
+# shape of failure this family knows.
 #
 # Woolworths' page script reads `navigator.webdriver`, and Playwright and
 # Selenium both set it true by default. When it is true the SPA navigates
@@ -151,7 +151,7 @@ DEFAULT_BROWSER_CHANNEL = None
 #                        on the search page
 #
 # Named here rather than at the call site so the smoke suite can assert all
-# three engines pass their own spelling of it (§6: the three must agree).
+# three engines pass their own spelling of it (the three must agree).
 LAUNCH_ARGS = ("--disable-blink-features=AutomationControlled",)
 
 # How long to wait for a remote browser to accept the CDP connection.
@@ -185,7 +185,7 @@ def _chrome_ua(chromium_version: str) -> str:
             f"(KHTML, like Gecko) Chrome/{chromium_version} Safari/537.36")
 
 
-# One definition each, in page_flow, shared by the three engines (§27.5),
+# One definition each, in page_flow, shared by the three engines,
 # with the measurements behind them written down there. Bound here so every
 # caller — the concurrent fetcher, `scrape`, the suite — keeps naming them
 # the way the family does.
@@ -210,7 +210,7 @@ DOM_CONFIRM_FLOOR = page_flow.DOM_CONFIRM_FLOOR
 # engines make it identically. What lives here is only HOW to ask this
 # particular driver.
 #
-# The primitives are NAMED OPERATIONS rather than JavaScript (§1). Selenium's
+# The primitives are NAMED OPERATIONS rather than JavaScript. Selenium's
 # execute_script takes a function BODY with an explicit `return` while
 # Playwright and pyppeteer take `() => expr`, so a shared module handing JS
 # across this boundary would quietly acquire one driver's dialect.
@@ -246,7 +246,7 @@ def _fetch_api_raw(page, path: str, body=None, timeout_ms: int = 45_000):
     Handed to `page.evaluate` as a real FUNCTION OBJECT, which goes through
     `Runtime.callFunctionOn`. Not as a string: a string is evaluated, and a
     site whose CSP lacks `unsafe-eval` refuses that outright — it took a
-    sibling repo's run down with EvalError and exit 1 (§18). Woolworths'
+    sibling repo's run down with EvalError and exit 1. Woolworths'
     CSP was checked and does permit string eval, so this is not working
     around a measured failure here; it costs nothing and the family has
     already paid for the lesson once.
@@ -295,7 +295,7 @@ def _read_tiles(session) -> List[dict]:
     A tile with no product link is skipped rather than guessed at: 25 of the
     67 tiles on one category page belong to a "you might also like" carousel,
     and the stockcode in each tile's OWN link is what keeps a carousel tile
-    from ever being attributed to a grid row (§4).
+    from ever being attributed to a grid row.
     """
     js = """() => {
         const out = [];
@@ -325,13 +325,13 @@ def _read_tiles(session) -> List[dict]:
 # be refused while the document keeps answering 200. Counting the refusals is
 # what separates a listing that ran out (COMPLETE) from one whose next page
 # was refused (PARTIAL) — without it the two are the same observation and a
-# throttled run reports "complete" holding page 1 (§7).
+# throttled run reports "complete" holding page 1.
 #
 # Any status other than 200, rather than one specific code, and the SAME test
 # in all three engines. A test that differed between them would mean one
 # engine reporting `complete` where its twins report `partial` on the
 # identical run, which is precisely the drift the shared modules exist to
-# prevent (§6).
+# prevent.
 _API_PATH_MARKER = "/apis/ui/"
 
 
@@ -341,7 +341,7 @@ def _watch_api(session) -> None:
     The document and the API are refused SEPARATELY on this site: the page
     itself can answer 200 while `/apis/ui/...` behind it is throttled. A run
     that saw that and reported "the listing ended" would claim a complete run
-    while holding page 1 (§7), so the count is kept and consulted.
+    while holding page 1, so the count is kept and consulted.
     """
     session._api_errors = 0
 
@@ -548,7 +548,7 @@ def _connect_remote(pw, args):
     # challenges inside the browser. Tried first when --cdp-endpoint is set;
     # this script's own detect+solve logic still runs as a fallback.
     #
-    # Worth knowing what it can and cannot do here, stated precisely (§19).
+    # Worth knowing what it can and cannot do here, stated precisely.
     #
     # The refusal this site actually serves is Akamai's edge denial: HTTP 403
     # and roughly 400 bytes of plain HTML — a title, an `<h1>`, one sentence
@@ -573,7 +573,7 @@ def _connect_remote(pw, args):
     # keys on Cloudflare's own furniture and on a class-plus-sitekey pattern
     # the extension's script tag cannot match, so it is not fooled — and the
     # smoke suite pins that, because the failure mode is paying for a solve
-    # of a captcha that was never there (§19).
+    # of a captcha that was never there.
     try:
         cdp_session = context.new_cdp_session(page)
         cdp_session.send("Captcha.setAutoSolve",
@@ -653,7 +653,7 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True,
     retry-but-do-not-solve and nothing is ever charged for it.
 
     Say that precisely, because the sentence next door is the most expensive
-    mistake this family has made (§19): this is a statement about WHAT THIS
+    mistake this family has made: this is a statement about WHAT THIS
     PAGE CARRIES, not about what a solver can do. "Unsolvable" is a property
     of a page with no widget on it. If Woolworths ever serves an
     interstitial that does carry one, `captcha_solver.py` already implements
@@ -662,7 +662,7 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True,
     (`TurnstileTaskProxyless`), and the one line to change is that flag.
 
     The detector is still run on every navigation, and that asymmetry is
-    deliberate (§8). What a visitor meets depends on the exit country and on
+    deliberate. What a visitor meets depends on the exit country and on
     what the address has been doing, and a narrow detector is how a rendered
     challenge gets reported as an empty category months later. The cost of
     running it on a good page is one DOM read; the cost of not running it is
@@ -678,7 +678,7 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True,
     — there is no site-specific captcha shape to key on here, and the
     family's general detector is what remains.
 
-    ONE CAVEAT, and it is the §19 extension trap arriving for real: a page
+    ONE CAVEAT, and it is the extension trap arriving for real: a page
     fetched through the Scraping Browser is NOT clean. The same served
     listing that counts 0 locally counts `turnstile` 3, `recaptcha` 2 and
     `<captcha` 1 when fetched over --cdp-endpoint, because 2Captcha's
@@ -711,7 +711,7 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True,
     # DETECTION is broad and unconditional; SOLVING is policy. `allow_solve`
     # comes from `page_flow.should_solve(state)`, which is False for every
     # state on this site because Akamai's denial here carries no widget for
-    # a solver to answer (section 19). Detecting and then saying so is the
+    # a solver to answer. Detecting and then saying so is the
     # point: a challenge nobody logged is a silent zero months later.
     if not allow_solve:
         logger.warning(
@@ -737,10 +737,11 @@ def handle_captcha_if_present(page, args, allow_solve: bool = True,
                        "solved — continuing with whatever the page holds.")
         return False
     # The budget is charged HERE, immediately before the money is spent,
-    # and not after the solver returns: a failed solve is still billed
-    # (§19). One call site in this engine, inside the block-retry loop —
-    # so without this a page retried four times would buy four solves the
-    # day `page_flow.should_solve` starts returning True.
+    # and not after the solver returns: a failed solve is still billed.
+    # `page_flow.fetch_one_page` calls this once per page, after its
+    # block-retry loop, with a budget made for that page; any second call
+    # site added later (or a retry that reached this) still meets the same
+    # per-page allowance instead of buying another solve.
     if budget is not None and not budget.charge():
         logger.warning(
             "%s detected via %s, but this page has already spent its "
@@ -772,14 +773,14 @@ def _rows_from_payload(payload, args, page_num: int, data_source: str) -> List:
     `page_num` is threaded through rather than defaulted, because `position`
     restarts at 1 on every page: without the page number beside it a row from
     page 2 claims the same position as one from page 1 and the two are
-    indistinguishable in the output (§18).
+    indistinguishable in the output.
     """
     return products_from_payload(payload, page=page_num,
                                  data_source=data_source, host=CANONICAL_HOST)
 
 
 # ===========================================================================
-# Workers — archive mode only
+# Workers — pages 2..N of a search or category listing
 # ===========================================================================
 def _worker_pool(pool, worker_index: int):
     """A private ProxyPool for one worker, starting at a different exit.
@@ -791,8 +792,7 @@ def _worker_pool(pool, worker_index: int):
         several — N workers all leaving from one address is just a faster way
         to burn that address.
       * No shared mutable state between threads, so rotation needs no lock:
-        the concurrency is safe by construction rather than by discipline
-        (§7).
+        the concurrency is safe by construction rather than by discipline.
     """
     if not pool:
         return None
@@ -808,9 +808,9 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
     sync API a browser belongs to the thread that made it, so sharing one
     across threads is not an option even if it were desirable.
 
-    Only ever called for a day-archive walk. Those URLs are independent by
-    construction — page 5 is "five days earlier", knowable without fetching
-    page 4 — which is exactly what the other three modes do not have.
+    Called for pages 2..N of a search or category listing. They are
+    independent by construction: a page is an integer in the API request
+    body, so page 5 can be asked for without reading page 4.
     """
     work = queue.Queue()
     for spec in specs:
@@ -818,10 +818,10 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
 
     results = []
     results_lock = threading.Lock()
-    # Set when a day comes back with no rows at all. Without it, asking for
-    # 40 days of a tag that only published on three of them would fetch 37
-    # empty ones. Workers check it before taking more work, so at most
-    # (concurrency - 1) extra fetches are in flight when it trips.
+    # Set when a page comes back with no ORGANIC rows, i.e. the listing has
+    # ended. Without it, asking for 40 pages of a 3-page listing would fetch
+    # 37 pages of nothing but ads. Workers check it before taking more work,
+    # so at most (concurrency - 1) extra fetches are in flight when it trips.
     exhausted = threading.Event()
 
     def worker(index: int):
@@ -840,8 +840,25 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
                         if not first:
                             time.sleep(args.delay)
                         first = False
-                        outcome = _fetch_one_page(session, args, session.pool,
-                                                  page_num, url)
+                        try:
+                            outcome = _fetch_one_page(session, args,
+                                                      session.pool,
+                                                      page_num, url)
+                        except Exception:  # noqa: BLE001 — recorded below
+                            # The page this worker was holding is a FAILED
+                            # page, not a lost one: it left the queue, so it
+                            # is in no other list, and dropping it reported
+                            # a run missing a page as complete. The session
+                            # may be unusable after this, so the worker
+                            # stops and leaves the rest to its siblings.
+                            logger.exception("[%s] page %d raised; it is "
+                                             "recorded as a failed page.",
+                                             name, page_num)
+                            with results_lock:
+                                results.append(PageOutcome(
+                                    page_num=page_num, url=url,
+                                    load_failed=True, state="worker_error"))
+                            break
                         with results_lock:
                             results.append(outcome)
                         # ORGANIC rows, not rows. Past its last real page
@@ -850,7 +867,7 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
                         # 16-page category returned 8 rows, every one an ad.
                         # A worker that stopped on "no rows" would never
                         # stop, and would pad the output with the same eight
-                        # ads once per queued page (§7).
+                        # ads once per queued page.
                         if outcome.ok and not page_flow.organic_count(
                                 outcome.products):
                             logger.info("[%s] page %d carried no organic "
@@ -874,7 +891,7 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
 
     # Anything still queued was never attempted (a worker died, or dispatch
     # stopped at the end of the listing). NOT reported as failed pages: they
-    # were not tried, and claiming otherwise would overstate the damage (§8).
+    # were not tried, and claiming otherwise would overstate the damage.
     unattempted = []
     while True:
         try:
@@ -897,11 +914,11 @@ def _fetch_api(session, path, body=None):
 # ===========================================================================
 # The driver primitives the shared loop asks for
 # ===========================================================================
-# `page_flow.fetch_one_page` is ONE implementation for all three engines
-# (§27.5); this class is the only part of it that is Playwright's. Every
+# `page_flow.fetch_one_page` is ONE implementation for all three engines;
+# this class is the only part of it that is Playwright's. Every
 # method is either a driver call or a two-line adapter, and no JavaScript
 # crosses the boundary in either direction — the shared module names the
-# OPERATION and this spells it in Playwright's dialect (§1).
+# OPERATION and this spells it in Playwright's dialect.
 #
 # `smoke_test.py` derives the required method set from page_flow's own AST
 # rather than from a hand-written list, so the day the loop reaches for a
@@ -997,19 +1014,8 @@ def _fetch_one_page(session, args, pool, page_num: int,
     return page_flow.fetch_one_page(ops, args, pool, page_num, url)
 
 def _stop_reason_for(outcome) -> str:
-    """Why the walk stopped, named by what actually went wrong.
-
-    `parser_found_nothing` is binance's name for it (section 26) and is
-    deliberately NOT in `COMPLETE_STOP_REASONS`: the site said it held
-    results and we produced none, so nothing about the catalogue has been
-    established. Without this the branch fell through to
-    `blocked_{blocked_by}` and reported `blocked_None`.
-    """
-    if getattr(outcome, "parse_failed", False):
-        return "parser_found_nothing"
-    if outcome.load_failed:
-        return "page_load_timeout"
-    return f"blocked_{outcome.blocked_by}"
+    """Why the walk stopped; see `page_flow.stop_reason_for`."""
+    return page_flow.stop_reason_for(outcome)
 
 
 def _honour_store_request(session, args, pool):
@@ -1019,7 +1025,7 @@ def _honour_store_request(session, args, pool):
     The refusal is the point. Accepting `--store-id` and then scraping
     whatever store the session happens to have, with the requested number
     stamped on every row, would produce a file that is real in every cell
-    and wrong in the one that matters (§8: never present a guess as a
+    and wrong in the one that matters (never present a guess as a
     fact). So the request is MADE, the session's own store is read before
     and after, and a run that did not get what it asked for stops.
     """
@@ -1029,6 +1035,15 @@ def _honour_store_request(session, args, pool):
 
     landing = page_flow.PageOutcome(page_num=1, url=args.url)
     html, _status, state = page_flow.land(ops, args, landing)
+    if landing.load_failed and not page_flow.counts_as_blocked(state):
+        # No document came back (timeout or a failed exit): content not
+        # obtained, exit 5 — not a refusal, so no exit is advised.
+        landing.state = state
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=False,
+            stop_reason=page_flow.stop_reason_for(landing),
+            pages_requested=1, pages_completed=0, start_url=args.url,
+            final_url=args.url, mode=args.mode)
     if page_flow.counts_as_blocked(state):
         logger.error("The landing page was refused, so the store request "
                      "could not even be made. %s", page_flow.block_advice(
@@ -1060,7 +1075,7 @@ def _run_store_lookup(session, args, pool) -> int:
     Kept apart from the listing path on purpose: there is no pagination,
     no DOM to read, no tiles to wait for and no price to confirm, so
     routing it through `fetch_one_page` would mean five branches that are
-    False for every store run (§"a branch keyed on a mode that does not
+    False for every store run ("a branch keyed on a mode that does not
     exist" — four dead branches per engine is a real cost this family has
     already paid).
     """
@@ -1070,6 +1085,15 @@ def _run_store_lookup(session, args, pool) -> int:
 
     landing = page_flow.PageOutcome(page_num=1, url=args.url)
     html, _status, state = page_flow.land(ops, args, landing)
+    if landing.load_failed and not page_flow.counts_as_blocked(state):
+        # No document came back (timeout or a failed exit): content not
+        # obtained, exit 5 — not a refusal, so no exit is advised.
+        landing.state = state
+        return finish_run(
+            [], args.out, args.format, args.allow_empty, blocked=False,
+            stop_reason=page_flow.stop_reason_for(landing),
+            pages_requested=1, pages_completed=0, start_url=args.url,
+            final_url=args.url, mode=args.mode)
     if page_flow.counts_as_blocked(state):
         logger.error("The landing page was refused, so the locator cannot "
                      "be asked: a store lookup is a request made from "
@@ -1124,6 +1148,7 @@ def scrape(args) -> int:
     blocked = False
     dedupe_key = "sku"
     stop_reason = "completed"
+    pages_unattempted: List[int] = []
 
     pool = proxy_pool_from_args(args)
     if pool and args.cdp_endpoint:
@@ -1133,7 +1158,7 @@ def scrape(args) -> int:
         pool = None
 
     # Every page of every mode is addressable: a page is an integer in a
-    # request body, so page N can be asked for without reading page N-1 (§7).
+    # request body, so page N can be asked for without reading page N-1.
     by_url = page_flow.paginates_by_url(args.mode, args.url)
 
     concurrency = max(1, args.concurrency)
@@ -1221,8 +1246,22 @@ def scrape(args) -> int:
                         blocked = blocked or any(o.blocked_by for o in failed)
                     elif exhausted:
                         stop_reason = "pagination_exhausted"
-                    if unattempted:
-                        logger.info("%d page(s) were never attempted: %s.",
+                    if unattempted and not exhausted:
+                        # Not the end of the listing: the workers stopped
+                        # (a browser that never launched, a worker that
+                        # died) with pages still queued. The run did not
+                        # get what it was asked for, so it is not complete.
+                        pages_unattempted = unattempted
+                        if stop_reason == "completed":
+                            stop_reason = "pages_unattempted"
+                        logger.warning("%d page(s) were never attempted "
+                                       "because the workers stopped: %s. "
+                                       "The run is reported as partial.",
+                                       len(unattempted),
+                                       ", ".join(str(n) for n in unattempted))
+                    elif unattempted:
+                        logger.info("%d page(s) past the end of the listing "
+                                    "were not asked for: %s.",
                                     len(unattempted),
                                     ", ".join(str(n) for n in unattempted))
                 elif args.pages > 1:
@@ -1246,7 +1285,7 @@ def scrape(args) -> int:
                         # Past its last real page this API keeps answering
                         # 200 with nothing but the same promoted rows page 1
                         # carried, so a loop testing "were there rows" never
-                        # terminates (§7, and see page_flow.advance_page).
+                        # terminates (see page_flow.advance_page).
                         turn = page_flow.advance_page(out.products, seen_keys)
                         seen_keys.update(p.sku for p in out.products
                                          if p.sku is not None)
@@ -1271,7 +1310,7 @@ def scrape(args) -> int:
 
     # Merge in PAGE ORDER, not arrival order: dedupe that mutates a running
     # set inside the loop makes the output depend on which page finished
-    # first (§8).
+    # first.
     all_rows = []
     seen = set()
     for outcome in sorted(outcomes, key=lambda o: o.page_num):
@@ -1321,6 +1360,9 @@ def scrape(args) -> int:
         "unauthorised_redirect": any(o.unauthorised for o in outcomes),
         "dom_confirm": next((o.dom_confirm for o in outcomes
                              if o.dom_confirm), None),
+        # Queued pages no worker reached, apart from pages_failed (tried and
+        # failed). Empty unless a concurrent run's workers stopped early.
+        "pages_unattempted": pages_unattempted,
     }
 
     final_url = next((o.final_url for o in sorted(outcomes,
@@ -1366,7 +1408,7 @@ def parse_args():
                    help="Label to tag output rows with. Filled from the URL "
                         "by default — the search term or the category slug — "
                         "so it is rarely empty.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_flag, default=1,
                    help=f"Number of pages to walk (default 1, cap {PAGE_CAP}). "
                         f"A page is a real, independent request: page N is an "
                         f"integer in the request body, so pages can be "
@@ -1376,13 +1418,13 @@ def parse_args():
                         f"when a page comes back empty, because past its last "
                         f"real page this listing keeps answering 200 with "
                         f"nothing but promoted ads.")
-    p.add_argument("--delay", type=float, default=2.0,
+    p.add_argument("--delay", type=page_flow.delay_flag, default=2.0,
                    help="Delay between pages, seconds (default 2.0). These "
                         "are API calls inside an already-loaded page rather "
                         "than navigations, so they are cheap — but they are "
                         "still requests from one address, and the address is "
                         "what Akamai scores.")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--concurrency", type=page_flow.concurrency_flag, default=1, metavar="N",
                    help="Fetch pages 2..N across N browsers, each on its own "
                         "exit (default 1). Allowed here because every page is "
                         "addressable. Refused with --cdp-endpoint: the "
@@ -1393,7 +1435,7 @@ def parse_args():
     p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3). "
                         "The pause between attempts doubles each time.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_flag, default=2.0,
                    help="Seconds before the first retry (default 2.0); it "
                         "doubles on each subsequent attempt.")
     p.add_argument("--format", choices=["json", "csv", "both"], default="json",
@@ -1427,7 +1469,7 @@ def parse_args():
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool before use, so parallel runs do not "
                         "all start on the same exit.")
-    p.add_argument("--proxy-block-retries", type=int, default=4, metavar="N",
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_flag, default=4, metavar="N",
                    help="How many EXTRA attempts to make when a page comes "
                         "back refused, each on the next exit (default 4, "
                         "and only with a pool). It is a count of RETRIES, "
@@ -1549,6 +1591,10 @@ def parse_args():
     args = p.parse_args(page_flow.join_near_argument(sys.argv[1:]))
     # Fill --twocaptcha-key / --cdp-endpoint / --proxy / --url from the
     # environment or .env when the flag was not given. An explicit flag wins.
+    # What the user TYPED is kept apart from what .env supplies: a copied
+    # .env.example sets WOOLWORTHS_URL, and reading that as a typed --url
+    # turned `--postcode 3000` into a search-listing run.
+    typed_url = args.url
     env_config.apply(args)
     if not args.url and not (args.mode == "stores" or any(
             getattr(args, n, None)
@@ -1566,7 +1612,7 @@ def parse_args():
     # and the user does not have to think about it.
     _store_lookup = any(getattr(args, n, None)
                         for n in ("postcode", "suburb", "near", "store_id"))
-    if args.mode == "stores" or (_store_lookup and args.url is None):
+    if args.mode == "stores" or (_store_lookup and typed_url is None):
         args.mode = "stores"
         if args.near:
             parts = [x.strip() for x in str(args.near).split(",")]
@@ -1582,7 +1628,7 @@ def parse_args():
         problem = page_flow.store_lookup_problem(args)
         if problem:
             p.error(problem)
-        args.url = args.url or STORE_LANDING_URL
+        args.url = typed_url or STORE_LANDING_URL
         args.category = args.category or (
             args.postcode or args.suburb or args.near or args.store_id)
         args.page_size = PAGE_SIZE
@@ -1601,7 +1647,7 @@ def parse_args():
     # Not silently ignored and not silently honoured. The attempt is made
     # at run time in `scrape`, against the live site, so what the reader
     # gets is the status the site returned today rather than a sentence
-    # written here months ago (section 13).
+    # written here months ago.
     if args.suburb or args.near:
         p.error("--suburb and --near only apply to --mode stores. A "
                 "listing is priced by a store, not by an area.")

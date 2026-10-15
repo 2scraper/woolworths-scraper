@@ -266,10 +266,10 @@ later.
 Use a different `pid` for concurrent runs, and reuse `pid`s across sequential
 runs rather than minting a new one each time (they are capped per account).
 
-A Scraping Browser profile's credentials also expire in about a day, which is
-why no working endpoint is pasted anywhere in this repo — it would be stale
-before you read it and would fail with an auth error a long way from its
-cause.
+A Scraping Browser profile's credentials can expire or be rotated, which is
+why no working endpoint is pasted anywhere in this repo. If a connection that
+used to work now fails with an authentication error (HTTP 401), re-check the
+credentials in your 2Captcha dashboard before anything else.
 
 ---
 

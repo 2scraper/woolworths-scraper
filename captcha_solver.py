@@ -6,7 +6,7 @@ Shared helper used by all three scrapers (Playwright / Selenium / Puppeteer).
 Detection runs after EVERY page navigation in the main loop of all three
 scrapers, regardless of what URL was requested (search, category, anything) —
 this is deliberate, not scoped to any one page. A challenge that nobody
-recognises becomes an empty category months later (CLAUDE.md §8).
+recognises becomes an empty category months later.
 
 WHERE THIS STANDS ON WOOLWORTHS
 --------------------------------
@@ -19,7 +19,7 @@ and a reference number — with no widget of any kind on it. So no solve is
 attempted on this site and nothing is charged.
 
 Say that precisely, because the sentence next door is the most expensive
-mistake this family has made (§19): **that is a statement about what these
+mistake this family has made: **that is a statement about what these
 pages carry, not about what a solver can do.** "Unsolvable" is a property of
 a page with no widget on it. The capabilities below are real and implemented,
 and if Woolworths ever serves an interstitial that carries a widget,
@@ -851,11 +851,11 @@ def solve_recaptcha(challenge: CaptchaChallenge, twocaptcha_api_key: Optional[st
                      api_version: str = "v2", min_score: float = 0.7) -> str:
     """Public entry point: solve `challenge` through 2captcha and return the token.
 
-    There used to be a `use_antidetect` branch here, behind a CLI flag of the
-    same name, that POSTed to a hardcoded local "solve-captcha" endpoint.
-    It was removed before publishing: that endpoint was a placeholder for a
-    product that does not exist under that name, so the flag could not work for
-    anyone who set it, and the real "the browser solves it for you" path is
+    There used to be a second branch here, behind its own CLI flag, that
+    POSTed to a hardcoded local "solve-captcha" endpoint. It was removed
+    before publishing: that endpoint was a placeholder for a product that
+    does not exist, so the flag could not work for anyone who set it, and
+    the real "the browser solves it for you" path is
     `Captcha.setAutoSolve` over the Scraping Browser API. A flag that cannot
     succeed is worse than a missing feature — it reads as an option.
     """

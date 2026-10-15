@@ -2,7 +2,7 @@
 product_parser.py
 -----------------
 Woolworths extraction. THIS FILE IS THE SITE — everything else in the repo is
-family core with a handful of named constants (CLAUDE.md §1).
+family core with a handful of named constants.
 
 What Woolworths actually publishes, measured 2026-09-16
 --------------------------------------------------------
@@ -37,17 +37,17 @@ all three and `data_source` records which one did.
 
 There is deliberately NO HTML fallback path
 -------------------------------------------
-§4 asks for two paths, structured first and a CSS/URL fallback second. The
+a family note asks for two paths, structured first and a CSS/URL fallback second. The
 second path is absent here, and the measurement above is the reason: a
 fallback parsing the served HTML would find zero products on every page
 Woolworths serves, on every mode, forever. That is dead code that looks
-load-bearing, which §17 says is worse than no code.
+load-bearing, which a family note says is worse than no code.
 
 What replaces it is a SECOND VIEW rather than a second parser: the engines
 read the shadow-DOM tiles through a driver primitive and hand the result to
 `overlay_dom_prices()`, which confirms the API's price against the rendered
-one and records `price_source` as `api+dom`. That is the reconciliation §4
-wants, and it is the only DOM read in this repo.
+one and records `price_source` as `api+dom`. That is the reconciliation the
+family contract wants, and it is the only DOM read in this repo.
 
 Four traps this file exists to avoid
 ------------------------------------
@@ -72,7 +72,7 @@ Four traps this file exists to avoid
 
 4.  **`akamai` appears on every page Woolworths SERVES and on neither page it
     refuses.** Counted: 1 occurrence on each of six served captures, 0 on
-    both denial pages. As a block marker it is exactly inverted — §18's rule
+    both denial pages. As a block marker it is exactly inverted — the rule
     ("count it on a page you know is good") catching a marker that three of
     this family's repos would have accepted on sight, since Woolworths is
     indeed fronted by Akamai.
@@ -100,17 +100,17 @@ logger = logging.getLogger("product_parser")
 # company's site on a different platform (Woolworths NZ, formerly Countdown)
 # and `woolworths.co.za` is a different company again (Woolworths Holdings,
 # South Africa) — neither runs this API, neither is in scope, and claiming
-# them would be the "is not a MediaMarkt site" error §5 warns about in
+# them would be the "is not a MediaMarkt site" error a family note warns about in
 # reverse.
 #
 # Taken from the site's own markup rather than from a guess, which is what
-# §5 asks for. Woolworths publishes NO `<link rel="alternate" hreflang=…>`
+# a family note asks for. Woolworths publishes NO `<link rel="alternate" hreflang=…>`
 # set at all — 0 occurrences of `hreflang` on a served page — and exactly one
 # canonical, `https://www.woolworths.com.au/...`. One host, named by the site.
 #
 # The apex answers too: `https://woolworths.com.au/...` returned HTTP 200 and
 # redirected to `www.`, so both spellings are accepted and both normalise to
-# the canonical one before a URL is rebuilt (§5's "whether hosts answer on
+# the canonical one before a URL is rebuilt (the "whether hosts answer on
 # www." check, run rather than assumed).
 CANONICAL_HOST = "www.woolworths.com.au"
 HOSTS = ("www.woolworths.com.au", "woolworths.com.au")
@@ -151,14 +151,14 @@ API_CATEGORIES_PATH = "/apis/ui/PiesCategoriesWithSpecials"
 # Zn.pickupStore.AddressId})`; the public store locator returns no
 # `AddressId`, and nothing in that endpoint list returns one either.
 #
-# §19's wording matters here and this is NOT a claim about what is possible:
+# the wording matters here and this is NOT a claim about what is possible:
 # **this repo does not implement an authenticated session**, so it cannot
 # set a fulfilment store. Whether an account could is untested.
 #
 # AND THE LISTING API IGNORES A STORE, SILENTLY. Seven spellings were added
 # to the category request body — storeId, StoreId, fulfilmentStoreId,
 # FulfilmentStoreId, storeNo, postcode, Postcode — and every one came back
-# HTTP 200 with the SAME 37 prices. That is §26's "the API answers wrong
+# HTTP 200 with the SAME 37 prices. That is the "the API answers wrong
 # values with plausible data": a parameter it does not know is accepted
 # rather than refused, so a scraper that sent one would report another
 # store's prices under that store's name and nothing would look wrong.
@@ -175,7 +175,7 @@ STORES_MAX = 30
 # the request, because the locator answers an impossible one with HTTP 200
 # and `{"Stores":[]}` — measured on 9999, 0000 and 99999 — which is
 # indistinguishable from "no store serves this real postcode". Telling a
-# typo from an empty answer is the whole point (§26).
+# typo from an empty answer is the whole point.
 _POSTCODE_RE = re.compile(r"^[0-9]{4}$")
 
 # What the site's own UI asks for, and therefore what looks ordinary. The
@@ -184,8 +184,8 @@ _POSTCODE_RE = re.compile(r"^[0-9]{4}$")
 PAGE_SIZE = 36
 
 # A listing's pages are addressable: page N is a request parameter, not a
-# cursor, and page 1 does not have to be read before page 5 can be asked for
-# (§7). Both modes qualify, which is why `--concurrency` is allowed on both.
+# cursor, and page 1 does not have to be read before page 5 can be asked for.
+# Both modes qualify, which is why `--concurrency` is allowed on both.
 PAGE_URL_REASON = (
     "both modes paginate by an integer page number in the request body, so "
     "page N is addressable without reading page N-1"
@@ -201,7 +201,7 @@ PAGE_CAP = 200
 # Page state: what did the site just hand us?
 # ===========================================================================
 # Akamai's refusal, in the two spellings the SAME page reaches a parser in
-# (§20, measured again here on a fourth site):
+# (measured again here on a fourth site):
 #
 #     raw bytes, as `requests` or curl see it
 #         You don&#39;t...  no — the LETTERS are plain, the PUNCTUATION is
@@ -219,7 +219,7 @@ PAGE_CAP = 200
 # unescaped over a bounded prefix before matching anyway, so a marker added
 # later does not reacquire the hole.
 #
-# Each was also counted on six pages known to be good (§18): 0 occurrences of
+# Each was also counted on six pages known to be good: 0 occurrences of
 # every one of them. `akamai` was a CANDIDATE and is deliberately absent — it
 # scored 1 on all six good pages and 0 on both denials.
 BOT_CHALLENGE_MARKERS = (
@@ -231,11 +231,11 @@ BOT_CHALLENGE_MARKERS = (
 # How much of the document to unescape before looking. An Akamai denial is
 # ~400 bytes; a served page is ~850 KB. Unescaping the whole of the latter on
 # every fetch buys nothing and risks a product name deep in a payload reading
-# as a marker (§20).
+# as a marker.
 UNESCAPE_PREFIX_BYTES = 4096
 
 # The POSITIVE signal, and the one that answers correctly where a marker list
-# cannot: was this page built out of Woolworths' own assets? (§8, and §18's
+# cannot: was this page built out of Woolworths' own assets? (and the
 # Chromium-error-page case, which a title check gets wrong because the error
 # page is titled with the site's own hostname.)
 #
@@ -243,7 +243,7 @@ UNESCAPE_PREFIX_BYTES = 4096
 # category, specials, the home page, and two fetched through the Scraping
 # Browser — and 0 on both denial pages.
 ASSET_HOST_MARKER = "cdn1.woolworths.media"
-# One, not two. §17's classification-order trap was a threshold of 2 rejecting
+# One, not two. the classification-order trap was a threshold of 2 rejecting
 # a minimal real page that carried 1; the measured floor here is 71 and the
 # measured ceiling on a denial is 0, so a threshold of 1 separates them with
 # the widest margin available and cannot be tripped by a lean page.
@@ -254,7 +254,7 @@ ASSET_HOST_MIN = 1
 #
 # The obvious candidate is Woolworths' own "we couldn't find any" copy, which
 # a no-results search does carry. It was taken as a marker and it was WRONG,
-# because §18's rule — count it on a page you know is good — had not been
+# because the rule — count it on a page you know is good — had not been
 # applied to it. Counted afterwards on six captures: a search with 2,205
 # results 4, a category 4, specials 4, the home page 4, a no-results search
 # 4, and a page fetched over CDP 4. The string lives in the JS bundle as a
@@ -270,7 +270,7 @@ ASSET_HOST_MIN = 1
 # tell an empty listing from a full one on this site, and does not try.
 
 # How many rendered tiles mean "the grid has painted". Must be > 1: waiting
-# for one resolves on the first tile long before the grid is done (§5).
+# for one resolves on the first tile long before the grid is done.
 MIN_CARD_MATCHES = 3
 
 # Names the engines use for the shadow-DOM read. These are NOT passed to
@@ -280,12 +280,12 @@ MIN_CARD_MATCHES = 3
 SELECTORS = {
     # The custom element that IS a tile. 67 on a category page: 42 in the
     # grid and 25 in a horizontal "you might also like" carousel, which is
-    # §4's neighbour-tile trap — `dom_tiles_to_index` keys on the stockcode
+    # the neighbour-tile trap — `dom_tiles_to_index` keys on the stockcode
     # in each tile's own link, so a carousel tile can only ever overwrite
     # itself.
     "tile": "wc-product-tile",
     # Inside a tile's shadow root. A tile links to its product TWICE (image
-    # and title), which is exactly the case §4 says to count DISTINCT ids
+    # and title), which is exactly the case a family note says to count DISTINCT ids
     # for rather than links.
     "item_link": 'a[href*="/shop/productdetails/"]',
     "price": '[class*="product-tile-price"]',
@@ -349,11 +349,11 @@ def detect_page_state(html: str, status: Optional[int] = None,
     distinction matters because the two want opposite responses: a shell
     wants a WAIT (the catalogue is still in flight), an unknown wants a
     refetch. Woolworths ships an SPA whose first response carries no
-    products by construction — §18's lesson that "which of the three missing-
+    products by construction — the lesson that "which of the three missing-
     content cases applies can differ between page kinds" arriving as a
     property of the whole site rather than of one route.
 
-    The order below is by how much each signal PROVES, not by cost (§17).
+    The order below is by how much each signal PROVES, not by cost.
     """
     # 1. The status, which on this site is the primary signal — Akamai
     #    answers a refused request with 403 and a 400-byte page.
@@ -415,7 +415,7 @@ def mode_for_url(url: str) -> Optional[str]:
 def unsupported_reason(url: str) -> Optional[str]:
     """Why this repo refuses `url`, in words that name the actual cause.
 
-    §5: "Refuse such a host WITH THE REASON — 'is not a Woolworths site' is
+    "Refuse such a host WITH THE REASON — 'is not a Woolworths site' is
     false and sends the reader looking for a typo."
     """
     if not is_woolworths_host(url):
@@ -515,7 +515,7 @@ def source_of(url: str) -> str:
 def currency_for(url_or_host: str) -> Optional[str]:
     """AUD, and only for a host this repo actually knows.
 
-    Never a defaulted currency for an unknown host (§4, rung 5: absent is
+    Never a defaulted currency for an unknown host (rung 5: absent is
     `null`, never a guessed "USD").
     """
     host = (urlsplit(url_or_host).hostname or url_or_host or "").lower()
@@ -735,7 +735,7 @@ def was_price_of(node: dict) -> Tuple[Optional[float], Optional[float], Optional
     test is the whole point of the function.
 
     `discount_pct` is computed from the two rather than read from a badge,
-    and is None rather than 0 where there is no discount (§4).
+    and is None rather than 0 where there is no discount.
     """
     price = _num(node.get("Price"))
     was = _num(node.get("WasPrice"))
@@ -836,7 +836,7 @@ def products_from_payload(payload: Any, *, page: Optional[int] = None,
     """Every row in one API response, in the order the site listed them.
 
     `position` is 1-based WITHIN THIS PAGE, which is why `page` has to travel
-    with it — §18's arithmetic bug, where 60 of 119 rows claimed a position
+    with it — the arithmetic bug, where 60 of 119 rows claimed a position
     another row already held because the page number was never threaded in.
     """
     rows: List[Product] = []
@@ -866,7 +866,7 @@ def price_from_tile_text(text: str) -> Optional[float]:
     """The first dollar amount in a tile's rendered text.
 
     Woolworths writes prices one way — `$3.80`, a dot decimal and a comma
-    thousands separator — so the three grouping conventions §4 catalogues do
+    thousands separator — so the three grouping conventions a family note catalogues do
     not all arise here. The comma is still stripped, because `$1,234.56` is
     reachable on a bulk item and would otherwise parse as 1.
     """
@@ -885,7 +885,7 @@ def dom_tiles_to_index(tiles: Sequence[dict]) -> Dict[str, dict]:
     Each tile is `{"href": ..., "price_text": ..., "cup_text": ...}` as the
     engine's driver produced it — this module never touches a browser.
 
-    Keying on the stockcode in the tile's OWN link is what makes §4's
+    Keying on the stockcode in the tile's OWN link is what makes the
     neighbour-tile trap unreachable: a "you might also like" carousel tile
     carries its own product's link, so it can only ever index itself. 25 of
     the 67 tiles on one category page were carousel tiles, and a scope-by-
@@ -924,7 +924,7 @@ def overlay_dom_prices(rows: Sequence[Product],
     This is a CONFIRMATION, not a correction. The API is the site's own
     structured answer and the tile is the same number after rendering; where
     they agree the row's `price_source` becomes `api+dom`, and where they
-    disagree the row is LEFT ALONE and a warning names the sku (§4:
+    disagree the row is LEFT ALONE and a warning names the sku (
     "overwriting a correct row is worse than leaving one uncorrected").
 
     Returns (rows confirmed, rows that had a tile to check against) so the
@@ -963,7 +963,7 @@ def overlay_dom_prices(rows: Sequence[Product],
 # catalogue back.
 #
 # They are plain dicts. No JavaScript crosses this boundary in either
-# direction (§1); each engine serialises these itself, in its own driver's
+# direction; each engine serialises these itself, in its own driver's
 # dialect.
 #
 # Both shapes are copied from the requests the SITE'S OWN UI sends, captured
@@ -1111,7 +1111,7 @@ def store_from_api(node: dict, *, how: str = "", position: Optional[int] = None
     Everything here is the site's own field, renamed and nothing else —
     no inference. `Distance` is kept as a NUMBER or left None: the suburb
     lookup has no origin to measure from and returns null, and a missing
-    distance must not read as a store on the doorstep (§8, and §21's "zero
+    distance must not read as a store on the doorstep (and the "zero
     is not a rating" wearing different clothes).
     """
     store_no = _text(node.get("StoreNo"))

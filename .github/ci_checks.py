@@ -81,7 +81,7 @@ CREDENTIAL_ALLOWED = (
     # pasted while debugging. An allowlist entry would have switched the
     # check off exactly there. A sibling repo's copy of this script FAILED ON
     # ITS OWN MAIN for the opposite reason: its fixtures were neither
-    # allowlisted nor written this way (§17).
+    # allowlisted nor written this way.
     # A PAST blob of smoke_test.py held the masking fixture as a complete
     # literal, `ws://user:secret@cb.2captcha.com:9222`. The current file
     # builds it by concatenation so the scan stays live on that file, but a
@@ -115,7 +115,44 @@ HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    ".json", ".csv", ".toml", ".sh", ".cfg", ".ini")
+# Files read whatever their suffix: the Dockerfile, and every dotenv-style
+# name except `.env` itself. `.env` is where a real key is SUPPOSED to live
+# (it is gitignored); `.env.bak`, `.env.old`, `.env.local` and friends are
+# copies of it, and a copy is how a key reaches a commit. Their suffix is
+# `.bak` or `.local`, so a suffix list alone never read them.
+SCANNED_NAMES = ("Dockerfile",)
+
+
+def _is_scanned_name(path):
+    name = path.name
+    if name in SCANNED_NAMES:
+        return True
+    if name.startswith(".env") and name != ".env":
+        return True
+    return path.suffix in SCANNED_SUFFIXES
+
+
+# Directory names skipped wherever they sit INSIDE the repo. Compared against
+# the path relative to the repo root, never the absolute path: a clone under
+# a parent directory called `venv` otherwise skipped every file and reported
+# "0 files scanned, nothing credential-shaped".
+_SKIPPED_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules"}
+
+# A secret-shaped value in a key-shaped field, including the JSON-escaped
+# form (`\"apiKey\": \"...\"`) that a fixture holding a captured request
+# body carries. Placeholders are excluded by their visible prefixes.
+KEY_SHAPED_FIELD = re.compile(
+    r'\\?"(?:[a-zA-Z_-]*(?:api[_-]?key|apikey|secret|password|'
+    r'client[_-]?key|access[_-]?key))\\?"\s*[:=]\s*'
+    r'\\?"(?!REDACTED|SCRUBBED|your_|\{|\*\*\*|<)'
+    r'[A-Za-z0-9_-]{16,}\\?"', re.I)
+
+# On a long line (a whole HTML document stored as one JSON string) the
+# context words are looked for NEAR the match only; anywhere on a 300 KB
+# line, "sha" would excuse every key on it.
+_LONG_LINE = 400
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -126,7 +163,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -155,10 +192,10 @@ def _is_in_virtualenv(path):
 
 def scanned_files():
     for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+        if not path.is_file() or not _is_scanned_name(path):
             continue
-        if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+        if any(part in _SKIPPED_DIRS
+               for part in path.relative_to(REPO).parts[:-1]):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -225,7 +262,7 @@ def sample_check():
 
     # The SECOND row class gets the same treatment. A repo with two of them
     # has two schemas to keep honest, and checking only the first is how
-    # the other goes stale without anything failing (§9).
+    # the other goes stale without anything failing.
     from output_writer import Store
     store_expected = list(asdict(Store()).keys())
     store_rows = json.loads(
@@ -270,15 +307,36 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} looks like a URL with real "
                               f"credentials in it")
 
-            for match in HEX32.findall(line):
-                if any(token in line.lower() for token in HEX32_ALLOWED):
+            for match in HEX32.finditer(line):
+                if _hex_excused(line, match):
                     continue
-                failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
-                              f"32-char hex string, the shape of a 2captcha key")
+                failed.append(f"{rel}:{lineno} contains {match.group(0)[:6]}… "
+                              f"— a 32-char hex string, the shape of a "
+                              f"2captcha key")
 
+            if KEY_SHAPED_FIELD.search(line):
+                failed.append(f"{rel}:{lineno} has a secret-shaped value in "
+                              f"a key-shaped field")
+
+    if scanned == 0:
+        failed.append("0 files scanned — the scan excluded the whole repo, "
+                      "which is a broken scan, not a clean one")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed
+
+
+def _hex_excused(line, match):
+    """A 32-hex run that is plainly not a key: low entropy (the site's own
+    script carries thirty-two zeros) or a hash named beside it."""
+    value = match.group(0)
+    if len(set(value)) < 8:
+        return True
+    if len(line) > _LONG_LINE:
+        context = line[max(0, match.start() - 40):match.end() + 10]
+    else:
+        context = line
+    return any(token in context.lower() for token in HEX32_ALLOWED)
 
 
 def history_check():

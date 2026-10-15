@@ -18,7 +18,7 @@ name: canary
 # here and the gate bought nothing but a green badge over an untested claim —
 # every scheduled run since this repo went public had been the skip branch.
 #
-# Sections 21 and 24: a canary that CAN pass without a credential must never
+# A canary that CAN pass without a credential must never
 # be gated on one. The README's central promise is that this site needs no
 # key, no proxy and no account, and an ungated daily run is that sentence
 # under test every morning. If Woolworths starts refusing runners, this goes
@@ -28,7 +28,7 @@ name: canary
 # the ENVIRONMENT rather than a `--proxy` line, because `env_config.py`
 # already reads that variable, an unset secret arrives as an empty string
 # which the loader treats as unset, and the credential never reaches a
-# command line (§3).
+# command line.
 
 on:
   schedule:
@@ -64,7 +64,7 @@ jobs:
       # A FILTERED CATEGORY and >= 3 pages. One page never exercises
       # pagination, which is exactly how a silent single-page bug survived in
       # a sibling repo — and on this site page 2 onward is where the
-      # ads-repeat-forever behaviour lives (§7).
+      # ads-repeat-forever behaviour lives.
       - name: Run the canary
         id: run
         env:
@@ -88,8 +88,9 @@ jobs:
         run: |
           case "${{ steps.run.outputs.exit_code }}" in
             0) echo "::notice::Run completed." ;;
-            3) echo "::error::Exit 3 — blocked. Akamai refused the proxy's exit. Check the exit is residential and, if it is, whether the site has changed what it refuses." ;;
+            3) echo "::error::Exit 3 — blocked. Akamai refused this runner (and the WOOLWORTHS_PROXY exit, if that secret is set). This canary is ungated on purpose: a refusal here means the site changed what it serves to a headful browser on a GitHub runner, and that is exactly what it exists to report." ;;
             4) echo "::error::Exit 4 — zero products from a category that is not empty. This is the parser, not the site." ;;
+            5) echo "::error::Exit 5 — no rows and the content was not obtained (navigation timeout, failed exit, or the parser read nothing from a listing that states results). See canary.log." ;;
             6) echo "::error::Exit 6 — partial. Some page failed; see the failed page numbers in the sidecar." ;;
             *) echo "::error::Unexpected exit ${{ steps.run.outputs.exit_code }}." ;;
           esac
@@ -122,6 +123,11 @@ jobs:
           want(len(rows) >= 90,
                f"{len(rows)} rows; three pages of this category produced ~110")
 
+          # Core fields on every row, not a share: a title and a URL are
+          # always published, so a missing one is the parser.
+          want(all(r.get("title") for r in rows), "some row has no title")
+          want(all(r.get("url") for r in rows), "some row has no url")
+
           priced = [r for r in rows if r.get("price") is not None]
           want(len(priced) / max(len(rows), 1) >= 0.90,
                f"only {len(priced)}/{len(rows)} rows carry a price")
@@ -134,7 +140,7 @@ jobs:
           pairs = [(r["page"], r["position"]) for r in rows]
           want(len(set(pairs)) == len(pairs), "page+position is not unique")
 
-          # The section 4 canary: a was-price that is not above the price
+          # The was-price check: a was-price that is not above the price
           # means WasPrice was read straight, which puts a 0% discount on
           # four products in five.
           bad = [r["sku"] for r in rows
