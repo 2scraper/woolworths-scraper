@@ -2056,5 +2056,771 @@
   "ShopperStatusId": null,
   "MfaRequired": false,
   "DateCreated": null
+ },
+ "tiles_carousel_first": {
+  "captured": "2026-10-15, headful Chromium, /shop/browse/bakery",
+  "early": [
+   {
+    "href": "/shop/productdetails/6069730/woolworths-halloween-chocolate-caramel-mudcake-slices",
+    "price_text": "$14.00\n        \n          \n\n          \n          \n\n          $0.58 / 1EA",
+    "cup_text": "$0.58 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6092061/the-happy-baker-peanut-butter-brownie-cups",
+    "price_text": "$12.00\n        \n          \n\n          \n          \n\n          $6.00 / 1EA",
+    "cup_text": "$6.00 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6085367/goodness-bake-double-choc-brownie",
+    "price_text": "$7.20\n        \n          \n\n          \n          \n\n          $3.27 / 100G",
+    "cup_text": "$3.27 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6085225/goodness-bake-classic-caramel-slice",
+    "price_text": "$7.20\n        \n          \n\n          \n          \n\n          $3.27 / 100G",
+    "cup_text": "$3.27 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6085884/great-temptations-gluten-free-angel-cake-slices",
+    "price_text": "$6.50\n        \n          \n\n          \n          \n\n          $4.33 / 100G",
+    "cup_text": "$4.33 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6088323/woolworths-granola-chocolate-cookies",
+    "price_text": "$4.30\n        \n          \n\n          \n          \n\n          $0.86 / 1EA",
+    "cup_text": "$0.86 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6033012/tip-top-cafe-thick-cut-raisin-toast-loaf",
+    "price_text": "$5.50\n        \n          \n\n          \n          $7.20\n\n          $0.92 / 100G",
+    "cup_text": "$0.92 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/846809/mr-kipling-angel-cake-slices",
+    "price_text": "$3.10\n        \n          \n\n          \n          $6.20\n\n          $0.52 / 1EA",
+    "cup_text": "$0.52 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/236288/mighty-soft-raisin-toast",
+    "price_text": "$4.50\n        \n          \n\n          \n          $7.40\n\n          $0.75 / 100G",
+    "cup_text": "$0.75 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/182138/helga-s-traditional-white-wraps",
+    "price_text": "$3.50\n        \n          \n\n          \n          $5.50\n\n          $0.69 / 100G",
+    "cup_text": "$0.69 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/320195/mission-wraps-mini-original",
+    "price_text": "$4.50\n        \n          \n\n          \n          $5.60\n\n          $1.17 / 100G",
+    "cup_text": "$1.17 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/66921/woolworths-butter-croissant",
+    "price_text": "$9.00\n        \n          \n\n          \n          \n\n          $0.90 / 1EA",
+    "cup_text": "$0.90 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/867246/toscano-classic-pizza-bases",
+    "price_text": "$6.45\n        \n          \n\n          \n          $7.15\n\n          $2.15 / 100G",
+    "cup_text": "$2.15 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/46645/golden-pikelets",
+    "price_text": "$3.00\n        \n          \n\n          \n          $4.50\n\n          $1.50 / 100G",
+    "cup_text": "$1.50 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/289456/abbott-s-bakery-sourdough-white-bread-sandwich-slice-loaf",
+    "price_text": "$4.90\n        \n          \n\n          \n          $5.50\n\n          $0.64 / 100G",
+    "cup_text": "$0.64 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/243674/simson-s-pantry-mini-pizza-bases-plain",
+    "price_text": "$4.00\n        \n          \n\n          \n          $4.50\n\n          $1.67 / 100G",
+    "cup_text": "$1.67 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/785629/toscano-waffles",
+    "price_text": "$7.15\n        \n          \n\n          \n          $8.15\n\n          $1.99 / 100G",
+    "cup_text": "$1.99 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6066586/abbott-s-bakery-sourdough-english-muffins-white",
+    "price_text": "$4.90\n        \n          \n\n          \n          $6.90\n\n          $1.23 / 100G",
+    "cup_text": "$1.23 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/101011/woolworths-mini-mighty-cheese-scrolls",
+    "price_text": "$4.60\n        \n          \n\n          \n          $5.10\n\n          $0.77 / 1EA",
+    "cup_text": "$0.77 / 1EA"
+   }
+  ],
+  "late": [
+   {
+    "href": "/shop/productdetails/6069730/woolworths-halloween-chocolate-caramel-mudcake-slices",
+    "price_text": "$14.00\n        \n          \n\n          \n          \n\n          $0.58 / 1EA",
+    "cup_text": "$0.58 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6092061/the-happy-baker-peanut-butter-brownie-cups",
+    "price_text": "$12.00\n        \n          \n\n          \n          \n\n          $6.00 / 1EA",
+    "cup_text": "$6.00 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6085367/goodness-bake-double-choc-brownie",
+    "price_text": "$7.20\n        \n          \n\n          \n          \n\n          $3.27 / 100G",
+    "cup_text": "$3.27 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6085225/goodness-bake-classic-caramel-slice",
+    "price_text": "$7.20\n        \n          \n\n          \n          \n\n          $3.27 / 100G",
+    "cup_text": "$3.27 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6085884/great-temptations-gluten-free-angel-cake-slices",
+    "price_text": "$6.50\n        \n          \n\n          \n          \n\n          $4.33 / 100G",
+    "cup_text": "$4.33 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6088323/woolworths-granola-chocolate-cookies",
+    "price_text": "$4.30\n        \n          \n\n          \n          \n\n          $0.86 / 1EA",
+    "cup_text": "$0.86 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6033012/tip-top-cafe-thick-cut-raisin-toast-loaf",
+    "price_text": "$5.50\n        \n          \n\n          \n          $7.20\n\n          $0.92 / 100G",
+    "cup_text": "$0.92 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/846809/mr-kipling-angel-cake-slices",
+    "price_text": "$3.10\n        \n          \n\n          \n          $6.20\n\n          $0.52 / 1EA",
+    "cup_text": "$0.52 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/236288/mighty-soft-raisin-toast",
+    "price_text": "$4.50\n        \n          \n\n          \n          $7.40\n\n          $0.75 / 100G",
+    "cup_text": "$0.75 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/182138/helga-s-traditional-white-wraps",
+    "price_text": "$3.50\n        \n          \n\n          \n          $5.50\n\n          $0.69 / 100G",
+    "cup_text": "$0.69 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/320195/mission-wraps-mini-original",
+    "price_text": "$4.50\n        \n          \n\n          \n          $5.60\n\n          $1.17 / 100G",
+    "cup_text": "$1.17 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/66921/woolworths-butter-croissant",
+    "price_text": "$9.00\n        \n          \n\n          \n          \n\n          $0.90 / 1EA",
+    "cup_text": "$0.90 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/867246/toscano-classic-pizza-bases",
+    "price_text": "$6.45\n        \n          \n\n          \n          $7.15\n\n          $2.15 / 100G",
+    "cup_text": "$2.15 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/46645/golden-pikelets",
+    "price_text": "$3.00\n        \n          \n\n          \n          $4.50\n\n          $1.50 / 100G",
+    "cup_text": "$1.50 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/289456/abbott-s-bakery-sourdough-white-bread-sandwich-slice-loaf",
+    "price_text": "$4.90\n        \n          \n\n          \n          $5.50\n\n          $0.64 / 100G",
+    "cup_text": "$0.64 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/243674/simson-s-pantry-mini-pizza-bases-plain",
+    "price_text": "$4.00\n        \n          \n\n          \n          $4.50\n\n          $1.67 / 100G",
+    "cup_text": "$1.67 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/785629/toscano-waffles",
+    "price_text": "$7.15\n        \n          \n\n          \n          $8.15\n\n          $1.99 / 100G",
+    "cup_text": "$1.99 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6066586/abbott-s-bakery-sourdough-english-muffins-white",
+    "price_text": "$4.90\n        \n          \n\n          \n          $6.90\n\n          $1.23 / 100G",
+    "cup_text": "$1.23 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/101011/woolworths-mini-mighty-cheese-scrolls",
+    "price_text": "$4.60\n        \n          \n\n          \n          $5.10\n\n          $0.77 / 1EA",
+    "cup_text": "$0.77 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6041394/bfree-large-coconut-macaroons",
+    "price_text": "$4.00\n        \n          \n\n          \n          \n\n          $0.67 / 1EA",
+    "cup_text": "$0.67 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/634918/woolworths-white-wrap",
+    "price_text": "$2.20\n        \n          \n\n          \n          \n\n          $0.61 / 100G",
+    "cup_text": "$0.61 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/277728/woolworths-white-sandwich-bread-loaf",
+    "price_text": "$2.50\n        \n          \n\n          \n          \n\n          $0.38 / 100G",
+    "cup_text": "$0.38 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/581176/woolworths-wholemeal-soft-sandwich-bread",
+    "price_text": "$2.80\n        \n          \n\n          \n          \n\n          $0.43 / 100G",
+    "cup_text": "$0.43 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/49622/golden-crumpets-round",
+    "price_text": "$5.20\n        \n          \n\n          \n          \n\n          $0.87 / 1EA",
+    "cup_text": "$0.87 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/713816/tip-top-the-one-white-sandwich-slice-bread-loaf-bakery",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $0.66 / 100G",
+    "cup_text": "$0.66 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/263669/wonder-white-bread-vitamins-minerals-sandwich",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $0.66 / 100G",
+    "cup_text": "$0.66 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/46795/tip-top-english-muffins-original-bakery",
+    "price_text": "$6.80\n        \n          \n\n          \n          \n\n          $1.13 / 1EA",
+    "cup_text": "$1.13 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/33878/woolworths-soft-hamburger-rolls-soft-hamburger",
+    "price_text": "$3.00\n        \n          \n\n          \n          \n\n          $0.50 / 1EA",
+    "cup_text": "$0.50 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6037735/woolworths-stonebaked-turkish-rolls",
+    "price_text": "$2.60\n        \n          \n\n          \n          \n\n          $0.65 / 100G",
+    "cup_text": "$0.65 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/55656/woolworths-soft-white-loaf-white-extra-soft-loaf",
+    "price_text": "$3.30\n        \n          \n\n          \n          \n\n          $0.49 / 100G",
+    "cup_text": "$0.49 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/224737/woolworths-english-muffins",
+    "price_text": "$2.90\n        \n          \n\n          \n          \n\n          $0.48 / 1EA",
+    "cup_text": "$0.48 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/33593/woolworths-all-butter-croissants",
+    "price_text": "$2.60\n        \n          \n\n          \n          \n\n          $0.65 / 1EA",
+    "cup_text": "$0.65 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/320194/mission-wraps-original",
+    "price_text": "$5.60\n        \n          \n\n          \n          \n\n          $0.99 / 100G",
+    "cup_text": "$0.99 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/233160/woolworths-soft-white-loaf-white-extra-soft-loaf",
+    "price_text": "$3.60\n        \n          \n\n          \n          \n\n          $0.45 / 100G",
+    "cup_text": "$0.45 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/253937/wonder-white-wholemeal-with-iron-sandwich-slice",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $0.66 / 100G",
+    "cup_text": "$0.66 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6016711/woolworths-hamburger-buns",
+    "price_text": "$2.70\n        \n          \n\n          \n          \n\n          $0.45 / 1EA",
+    "cup_text": "$0.45 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/581280/woolworths-white-soft-hi-fibre-bread",
+    "price_text": "$3.25\n        \n          \n\n          \n          \n\n          $0.46 / 100G",
+    "cup_text": "$0.46 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/363952/woolworths-35hr-sourdough-loaf-white-loaf",
+    "price_text": "$7.00\n        \n          \n\n          \n          \n\n          $7.00 / 1EA",
+    "cup_text": "$7.00 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/713834/tip-top-the-one-white-toast-slice-bread-loaf-bakery",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $0.66 / 100G",
+    "cup_text": "$0.66 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/130502/woolworths-soft-round-rolls-extra-soft-lunch",
+    "price_text": "$3.00\n        \n          \n\n          \n          \n\n          $0.50 / 1EA",
+    "cup_text": "$0.50 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/634919/woolworths-wholegrain-wrap-8pk",
+    "price_text": "$2.20\n        \n          \n\n          \n          \n\n          $0.61 / 100G",
+    "cup_text": "$0.61 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/177677/mission-souvlaki-bread",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $1.44 / 100G",
+    "cup_text": "$1.44 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/84129/helga-s-bread-traditional-wholemeal",
+    "price_text": "$5.20\n        \n          \n\n          \n          \n\n          $0.69 / 100G",
+    "cup_text": "$0.69 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/581172/woolworths-white-soft-sandwich-bread",
+    "price_text": "$2.80\n        \n          \n\n          \n          \n\n          $0.43 / 100G",
+    "cup_text": "$0.43 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/6016644/woolworths-hot-dog-rolls",
+    "price_text": "$2.60\n        \n          \n\n          \n          \n\n          $0.43 / 1EA",
+    "cup_text": "$0.43 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/803943/brioche-gourmet-burger-buns",
+    "price_text": "$6.50\n        \n          \n\n          \n          \n\n          $1.63 / 1EA",
+    "cup_text": "$1.63 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6035082/woolworths-mini-choc-chip-muffin",
+    "price_text": "$4.50\n        \n          \n\n          \n          \n\n          $0.56 / 1EA",
+    "cup_text": "$0.56 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6037733/woolworths-rustic-white-sourdough-loaf",
+    "price_text": "$4.00\n        \n          \n\n          \n          \n\n          $0.80 / 100G",
+    "cup_text": "$0.80 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/97237/woolworths-all-butter-croissant",
+    "price_text": "$2.60\n        \n          \n\n          \n          \n\n          $0.87 / 1EA",
+    "cup_text": "$0.87 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6027918/helga-s-mixed-grain-loaf",
+    "price_text": "$5.20\n        \n          \n\n          \n          \n\n          $0.65 / 100G",
+    "cup_text": "$0.65 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/263667/wonder-white-bread-vitamins-minerals-toast",
+    "price_text": "$4.60\n        \n          \n\n          \n          \n\n          $0.66 / 100G",
+    "cup_text": "$0.66 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/645865/bakery-du-jour-brioche-burger-buns",
+    "price_text": "$3.60\n        \n          \n\n          \n          \n\n          $0.90 / 1EA",
+    "cup_text": "$0.90 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/6028328/helga-s-soft-white-loaf",
+    "price_text": "$5.20\n        \n          \n\n          \n          \n\n          $0.74 / 100G",
+    "cup_text": "$0.74 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/33909/woolworths-soft-hot-dog-rolls-hotdog-extra-soft",
+    "price_text": "$3.00\n        \n          \n\n          \n          \n\n          $0.50 / 1EA",
+    "cup_text": "$0.50 / 1EA"
+   },
+   {
+    "href": "/shop/productdetails/365378/woolworths-pikelets",
+    "price_text": "$2.50\n        \n          \n\n          \n          \n\n          $1.25 / 100G",
+    "cup_text": "$1.25 / 100G"
+   },
+   {
+    "href": "/shop/productdetails/573301/menissez-bake-at-home-white-dinner-rolls",
+    "price_text": "$2.90\n        \n          \n\n          \n          \n\n          $0.48 / 1EA",
+    "cup_text": "$0.48 / 1EA"
+   }
+  ],
+  "api_page1": {
+   "Bundles": [
+    {
+     "Products": [
+      {
+       "Stockcode": 6041394,
+       "Barcode": "5391521697615",
+       "DisplayName": "Bfree Large Coconut Macaroons 6 pack",
+       "Name": "Bfree Large Coconut Macaroons",
+       "Brand": "Bfree",
+       "Description": " Bfree Large Coconut<br>Macaroons  6 pack",
+       "Variety": null,
+       "Price": 4,
+       "WasPrice": 4,
+       "SavingsAmount": 0,
+       "CupPrice": 0.67,
+       "CupMeasure": "1EA",
+       "CupString": "$0.67 / 1EA",
+       "PackageSize": "6 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": true,
+       "AdStatus": "Promoted",
+       "OfferId": null,
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 14,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/6041394.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/6041394.jpg",
+       "UrlFriendlyName": "bfree-large-coconut-macaroons",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE CAKE",
+        "healthstarrating": null,
+        "lifestyleanddietarystatement": "Gluten Free,Low Salt,Vegetarian",
+        "allergystatement": "Fish Free,Gluten Free,Wheat Free",
+        "ingredients": "Coconut (32%), Sugar, Glucose Syrup (From Corn), Egg White, Potato Starch, Dextrose, Rice Flour.",
+        "storageinstructions": "Store in a cool dry place away from direct sunlight. Frozen from fresh and thawed for your convenience.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Bfree Large Coconut Macaroons",
+     "DisplayName": "Bfree Large Coconut Macaroons 6 pack"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 49622,
+       "Barcode": "9310043003014",
+       "DisplayName": "Golden Crumpets Round 6 pack",
+       "Name": "Golden Crumpets Round",
+       "Brand": "Golden",
+       "Description": " Golden Crumpets Round 6 pack",
+       "Variety": "Round",
+       "Price": 5.2,
+       "WasPrice": 5.2,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.87,
+       "CupMeasure": "1EA",
+       "CupString": "$0.87 / 1EA",
+       "PackageSize": "6 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": null,
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/049622.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/049622.jpg",
+       "UrlFriendlyName": "golden-crumpets-round",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE BAKERY SNACKS",
+        "healthstarrating": "3",
+        "lifestyleanddietarystatement": "Halal,Low Fat,Low Sugar,Vegan,Vegetarian",
+        "allergystatement": "Egg Free,Fish Free,Soy Free",
+        "ingredients": "Wheat Flour, Water, Raising Agents (450, 500), Iodised Salt, Preservatives (282, 234), Dextrose, Vitamins (Thiamin, Folic Acid).",
+        "storageinstructions": "KEEP REFRIGERATED AT HOME. Recommended frozen shelf life, 2 months. On thawing consume immediately, do not refreeze.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Golden Crumpets Round",
+     "DisplayName": "Golden Crumpets Round 6 pack"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 6037735,
+       "Barcode": "9339687430635",
+       "DisplayName": "Woolworths Stonebaked Turkish Rolls 4 pack",
+       "Name": "Woolworths Stonebaked Turkish Rolls",
+       "Brand": "Woolworths",
+       "Description": " Woolworths Stonebaked<br>Turkish Rolls  4 pack",
+       "Variety": null,
+       "Price": 2.6,
+       "WasPrice": 2.6,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.65,
+       "CupMeasure": "100G",
+       "CupString": "$0.65 / 100G",
+       "PackageSize": "4 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": "25297758",
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/6037735.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/6037735.jpg",
+       "UrlFriendlyName": "woolworths-stonebaked-turkish-rolls",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE INTERNATIONAL BREAD",
+        "healthstarrating": "4",
+        "lifestyleanddietarystatement": "Low Sugar,Source of Fibre,Source of Protein,Vegan,Vegetarian",
+        "allergystatement": "Egg Free,Fish Free,No Artificial Colours or Flavours",
+        "ingredients": "Wheat Flour, Water, Sesame Seeds, Yeast, Vinegar, Iodised Salt, Canola Oil, Wheat Gluten, Nigella Seed, Preservative (Potassium Sorbate), Vitamins (Folic Acid, Thiamin), Processing Aids (Wheat).",
+        "storageinstructions": "Store in a cool, dry place, away from light.;This product has been frozen from fresh and thawed for your convenience.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Woolworths Stonebaked Turkish Rolls",
+     "DisplayName": "Woolworths Stonebaked Turkish Rolls 4 pack"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 320194,
+       "Barcode": "9317224400495",
+       "DisplayName": "Mission Wraps Original 8 pack",
+       "Name": "Mission Wraps Original",
+       "Brand": "Mission",
+       "Description": " Mission Wraps Original 8 pack",
+       "Variety": "Original",
+       "Price": 5.6,
+       "WasPrice": 5.6,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.99,
+       "CupMeasure": "100G",
+       "CupString": "$0.99 / 100G",
+       "PackageSize": "8 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": null,
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/320194.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/320194.jpg",
+       "UrlFriendlyName": "mission-wraps-original",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE INTERNATIONAL BREAD",
+        "healthstarrating": null,
+        "lifestyleanddietarystatement": "Low Sugar,Source of Protein,Vegan,Vegetarian",
+        "allergystatement": "Dairy Free,Egg Free,Fish Free,Lactose Free",
+        "ingredients": "Wheat flour (64%) (thiamine, folic acid), water, vegetable oil, mineral salts (450, 500), iodised salt, sugar, vegetable gums (412, 466), acidity regulator (297), emulsifier (471), preservatives (282, 200), processing aids (wheat).",
+        "storageinstructions": "Store in a cool dry place. Once open refrigerate and use within 3 days.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Mission Wraps Original",
+     "DisplayName": "Mission Wraps Original 8 pack"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 363952,
+       "Barcode": "0284757000005",
+       "DisplayName": "Woolworths 35hr Sourdough Loaf White each",
+       "Name": "Woolworths 35hr Sourdough Loaf White Loaf",
+       "Brand": "Woolworths",
+       "Description": " Woolworths 35hr Sourdough<br>Loaf White Loaf each",
+       "Variety": "Loaf",
+       "Price": 7,
+       "WasPrice": 7,
+       "SavingsAmount": 0,
+       "CupPrice": 7,
+       "CupMeasure": "1EA",
+       "CupString": "$7.00 / 1EA",
+       "PackageSize": "each",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": null,
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/363952.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/363952.jpg",
+       "UrlFriendlyName": "woolworths-35hr-sourdough-loaf-white-loaf",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "BAKEHOUSE",
+        "sapcategoryname": "INSTORE BAKERY",
+        "sapsubcategoryname": "ISB SPECIALTY BREAD",
+        "healthstarrating": "3.5",
+        "lifestyleanddietarystatement": "Low Fat,Low Saturated Fat,Low Sugar,Source of Protein",
+        "allergystatement": "Fish Free",
+        "ingredients": "Wheat Flour (Wheat Flour, Thiamin, Folic Acid), Sourdough Culture (Water, Wheat Flour, Thiamin, Folic Acid), Water, Wholemeal Wheat Flour (Wheat Flour, Thiamin, Folic Acid), Iodised Salt, Malted Wheat Flour, Yeast (Yeast, Emulsifier (491), Ascorbic Acid).",
+        "storageinstructions": null,
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Woolworths 35hr Sourdough Loaf White Loaf",
+     "DisplayName": "Woolworths 35hr Sourdough Loaf White each"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 84129,
+       "Barcode": "9310128002499",
+       "DisplayName": "Helga's Bread Traditional Wholemeal 750g",
+       "Name": "Helga's Bread Traditional Wholemeal",
+       "Brand": "Helga's",
+       "Description": " Helga's Bread Traditional<br>Wholemeal 750g",
+       "Variety": "Traditional Wholemeal",
+       "Price": 5.2,
+       "WasPrice": 5.2,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.69,
+       "CupMeasure": "100G",
+       "CupString": "$0.69 / 100G",
+       "PackageSize": "750g",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": "25321223",
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/084129.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/084129.jpg",
+       "UrlFriendlyName": "helga-s-bread-traditional-wholemeal",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE BREAD",
+        "healthstarrating": "4.5",
+        "lifestyleanddietarystatement": "Halal,High Fibre,Low Sugar,Source of Fibre,Source of Protein,Vegan,Vegetarian,Wholegrain",
+        "allergystatement": "Dairy Free,Egg Free,Fish Free,Lactose Free,No Artificial Colours or Flavours,No Artificial Preservatives",
+        "ingredients": "Wholemeal Wheat Flour (64%), Water, Yeast, Rye Meal, Vinegar, Wheat Gluten, Soy Flour, Canola Oil, Iodised Salt, Wheat Bran, Cultured Wheat Flour, Vegetable Emulsifiers (481), Vitamins (Thiamin, Folic Acid), Processing Aids (Wheat)",
+        "storageinstructions": "Helga's suggests bread be stored in a cool dry place, out of direct sunlight.\nFreezer Friendly: For best results, freeze on the day of purchase and enjoy within 4 months. Once thawed, consume within 3 days. Do not refreeze.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Helga's Bread Traditional Wholemeal",
+     "DisplayName": "Helga's Bread Traditional Wholemeal 750g"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 6035082,
+       "Barcode": "9339687429233",
+       "DisplayName": "Woolworths Mini Choc Chip Muffin 8 pack",
+       "Name": "Woolworths Mini Choc Chip Muffin",
+       "Brand": "Woolworths",
+       "Description": " Woolworths Mini Choc Chip<br>Muffin  8 pack",
+       "Variety": null,
+       "Price": 4.5,
+       "WasPrice": 4.5,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.56,
+       "CupMeasure": "1EA",
+       "CupString": "$0.56 / 1EA",
+       "PackageSize": "8 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": "25080625",
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 36,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/6035082.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/6035082.jpg",
+       "UrlFriendlyName": "woolworths-mini-choc-chip-muffin",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "BAKEHOUSE",
+        "sapcategoryname": "INSTORE BAKERY",
+        "sapsubcategoryname": "RESALE CAKE INSTORE",
+        "healthstarrating": "1.5",
+        "lifestyleanddietarystatement": "Vegetarian",
+        "allergystatement": "Fish Free,No Artificial Colours or Flavours",
+        "ingredients": "Wheat Flour, Water, Sugar, Canola Oil, Dark Chocol ate (5%) (Cocoa Mass , Cocoa Butter , Cocoa Powder , Sugar, Emulsifier (Lecithin), Natural Flavour), Dark Compound Chocolate (5%) (Sugar, Palm Fat, Co coa Solids , Emulsifier (Soy Lecithin), Natural Fl avour), Dextrose, Dried Egg, Whey Powder (Milk), R aising Agents (450, Potassium Carbonate), Thickene rs (1422, Xanthan Gum), Salt, Preservative (Potass ium Sorbate), Natural Flavour.",
+        "storageinstructions": "This product has been frozen from fresh and thawed for your convenience.;Store in a cool, dry place.",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Woolworths Mini Choc Chip Muffin",
+     "DisplayName": "Woolworths Mini Choc Chip Muffin 8 pack"
+    },
+    {
+     "Products": [
+      {
+       "Stockcode": 645865,
+       "Barcode": "9336047001702",
+       "DisplayName": "Bakery Du Jour Brioche Burger Buns 4 pack",
+       "Name": "Bakery Du Jour Brioche Burger Buns",
+       "Brand": "Bakery Du Jour",
+       "Description": " Bakery Du Jour Brioche<br>Burger Buns 4 pack",
+       "Variety": "Burger Buns",
+       "Price": 3.6,
+       "WasPrice": 3.6,
+       "SavingsAmount": 0.0,
+       "CupPrice": 0.9,
+       "CupMeasure": "1EA",
+       "CupString": "$0.90 / 1EA",
+       "PackageSize": "4 pack",
+       "Unit": "Each",
+       "IsOnSpecial": false,
+       "IsHalfPrice": false,
+       "IsSponsoredAd": false,
+       "AdStatus": null,
+       "OfferId": null,
+       "IsAvailable": true,
+       "IsInStock": true,
+       "IsPurchasable": true,
+       "SupplyLimit": 20,
+       "LargeImageFile": "https://cdn1.woolworths.media/content/wowproductimages/large/645865.jpg",
+       "MediumImageFile": "https://cdn1.woolworths.media/content/wowproductimages/medium/645865.jpg",
+       "UrlFriendlyName": "bakery-du-jour-brioche-burger-buns",
+       "AdditionalAttributes": {
+        "sapdepartmentname": "PROPRIETARY BAKERY",
+        "sapcategoryname": "PROPRIETARY BAKERY",
+        "sapsubcategoryname": "RESALE BAKERY SNACKS",
+        "healthstarrating": null,
+        "lifestyleanddietarystatement": null,
+        "allergystatement": "Fish Free",
+        "ingredients": "Wheat Flour (Thiamine, Folic Acid), Water, Sugar, Canola Oil, Butter (Milk), Egg, Cultured Wheat Flour, Gluten, Yeast, Improver (Calcium Carbonate, Vegetable Emulsifiers (472e, 471), Thickeners (412, 415)), Buttermilk Powder, Vinegar, Iodised Salt, Natural Vanilla Flavour, Natural Colour (100), Glaze (Water, Vegetable Protein, Sunflower Oil, Dextrose, Maltodextrose, Starch (Maize))",
+        "storageinstructions": "Not Suitable for Home Freezing",
+        "countryoforigin": null
+       },
+       "FulfilmentStoreId": 1101
+      }
+     ],
+     "Name": "Bakery Du Jour Brioche Burger Buns",
+     "DisplayName": "Bakery Du Jour Brioche Burger Buns 4 pack"
+    }
+   ],
+   "TotalRecordCount": 595,
+   "HasRewardsCard": true,
+   "HasTobaccoItems": false,
+   "Success": true
+  }
  }
 }

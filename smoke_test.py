@@ -40,6 +40,7 @@ import io
 import argparse
 import dataclasses
 import json
+import logging
 import os
 import pathlib
 import re
@@ -589,6 +590,78 @@ def test_dom_index_keys_on_the_tiles_own_stockcode():
              {"href": "", "price_text": "$4.00"}]
     index = P.dom_tiles_to_index(tiles)
     assert sorted(index) == ["11", "22"], sorted(index)
+
+
+class _TileOps:
+    """Just enough of an engine's ops for `confirm_with_dom`: a sequence of
+    tile reads, the last one repeated, and a clock that only counts."""
+
+    def __init__(self, *reads):
+        self.reads, self.calls, self.waited = list(reads), 0, 0
+
+    def read_tiles(self):
+        i = min(self.calls, len(self.reads) - 1)
+        self.calls += 1
+        return self.reads[i]
+
+    def wait_ms(self, ms):
+        self.waited += ms
+
+
+def _carousel_capture():
+    fx = FIXTURES["tiles_carousel_first"]
+    rows = P.products_from_payload(fx["api_page1"], page=1)
+    return fx, rows
+
+
+@check
+def test_the_carousel_tiles_carry_none_of_page_ones_stockcodes():
+    """The real capture behind the 2026-10-13 red canary: a 19-tile
+    carousel painted first, and page 1's rows are not in it."""
+    fx, rows = _carousel_capture()
+    assert len(fx["early"]) == 19 and len(fx["late"]) == 56, (
+        len(fx["early"]), len(fx["late"]))
+    assert [(r.sku, r.price) for r in rows[:3]] == [
+        ("6041394", 4.0), ("49622", 5.2), ("6037735", 2.6)], rows[:3]
+    assert P.rows_with_a_tile(rows, fx["early"]) == 0
+    assert P.overlay_dom_prices(rows, fx["early"]) == (0, 0)
+    rows = P.products_from_payload(fx["api_page1"], page=1)
+    assert P.rows_with_a_tile(rows, fx["late"]) == len(rows) == 8
+    assert P.overlay_dom_prices(rows, fx["late"]) == (8, 8)
+
+
+@check
+def test_dom_confirmation_waits_past_a_carousel_for_the_grid():
+    fx, rows = _carousel_capture()
+    ops = _TileOps(fx["early"], fx["early"], fx["late"])
+    dom = page_flow.confirm_with_dom(ops, rows, 1)
+    assert dom == {"tiles": 56, "checked": 8, "confirmed": 8}, (
+        f"the cross-check read the carousel and stopped: {dom}")
+    assert all(r.price_source == "api+dom" for r in rows)
+    assert ops.waited == 2 * page_flow.POLL_MS, ops.waited
+
+
+@check
+def test_dom_confirmation_gives_up_on_a_grid_that_never_paints():
+    fx, rows = _carousel_capture()
+    ops = _TileOps(fx["early"])
+    records = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    h = _Grab(level=logging.WARNING)
+    page_flow.logger.addHandler(h)
+    try:
+        dom = page_flow.confirm_with_dom(ops, rows, 1)
+    finally:
+        page_flow.logger.removeHandler(h)
+    assert dom == {"tiles": 19, "checked": 0, "confirmed": 0}, dom
+    assert ops.waited == page_flow.GRID_SETTLE_MS, ops.waited
+    assert any("none of them carries" in r.getMessage() for r in records), (
+        "0 rows checked against rendered tiles must be said at WARNING")
+    assert all(r.price_source == "api" for r in rows)
 
 
 @check

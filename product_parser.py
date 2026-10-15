@@ -901,6 +901,22 @@ def dom_tiles_to_index(tiles: Sequence[dict]) -> Dict[str, dict]:
     return index
 
 
+def rows_with_a_tile(rows: Sequence[Product], tiles: Sequence[dict]) -> int:
+    """How many rows have a rendered tile carrying their own stockcode.
+
+    Zero while tiles ARE on screen means the tiles belong to something other
+    than the grid. Measured 2026-10-15 on /shop/browse/bakery: a 19-tile
+    seasonal carousel paints about a second before the 37-tile grid, and
+    none of its stockcodes is on page 1 of the listing. A read taken in that
+    gap confirms nothing, which is what the 2026-10-13 canary recorded
+    (19 tiles, 0 checked).
+    """
+    index = dom_tiles_to_index(tiles)
+    if not index:
+        return 0
+    return sum(1 for row in rows if str(row.sku or "") in index)
+
+
 def overlay_dom_prices(rows: Sequence[Product],
                        tiles: Sequence[dict]) -> Tuple[int, int]:
     """Confirm each row's price against the rendered tile. (confirmed, checked)

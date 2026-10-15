@@ -81,6 +81,7 @@ from product_parser import (API_CATEGORIES_PATH, API_FULFILMENT_PATH,
                             detect_block_marker, detect_page_state,
                             is_unauthorised_redirect, iter_category_nodes,
                             organic_count, overlay_dom_prices,
+                            rows_with_a_tile,
                             postcode_problem, search_term_from_url,
                             store_request_for, stores_from_payload,
                             total_count)
@@ -486,6 +487,11 @@ FIELD_FLOOR = 90
 # painted does not trip it — it reports no check at all instead.
 DOM_CONFIRM_FLOOR = 90
 
+# How long the DOM cross-check waits for the GRID once some other tiles (a
+# carousel) are already on screen. The grid followed the carousel by about a
+# second in every live capture on 2026-10-15; ten is room for a slow runner.
+GRID_SETTLE_MS = 10_000
+
 
 @dataclass
 class PageOutcome:
@@ -755,11 +761,29 @@ def confirm_with_dom(ops, rows, page_num: int) -> Optional[dict]:
         logger.info("No rendered tiles were readable on page %d; rows keep "
                     "price_source='api'.", page_num)
         return None
+    # The readiness wait counts EVERY tile, and a carousel can satisfy it
+    # before the grid has painted (19 carousel tiles, then the 37-tile grid
+    # about a second later, measured 2026-10-15). Tiles on screen that hold
+    # none of this page's stockcodes are that gap, so wait — bounded — for
+    # the grid instead of confirming nothing.
+    waited = 0
+    while not rows_with_a_tile(rows, tiles) and waited < GRID_SETTLE_MS:
+        ops.wait_ms(POLL_MS)
+        waited += POLL_MS
+        tiles = ops.read_tiles() or tiles
     confirmed, checked = overlay_dom_prices(rows, tiles)
     share = (100.0 * confirmed / checked) if checked else 0.0
     logger.info("DOM price confirmation on page %d: %d of %d row(s) checked "
                 "against %d rendered tile(s) agreed (%.0f%%).",
                 page_num, confirmed, checked, len(tiles), share)
+    if not checked:
+        logger.warning(
+            "%d tile(s) rendered on page %d but none of them carries a "
+            "stockcode from this page's rows, after waiting %.1fs for the "
+            "grid. The rows are the API's and are unchanged, but nothing "
+            "confirmed them against the rendered grid: either the grid did "
+            "not paint or the tile markup changed.",
+            len(tiles), page_num, waited / 1000.0)
     if checked and share < DOM_CONFIRM_FLOOR:
         logger.warning(
             "Only %.0f%% of the rows checked against a rendered tile agreed "
