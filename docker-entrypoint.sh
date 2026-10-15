@@ -23,8 +23,7 @@
 # reaches the caller because we `exec`.
 #
 # Found by RUNNING the image rather than by building it. The build was green
-# for both of the broken versions above, which is why CI does both
-# (CLAUDE.md §11).
+# for both of the broken versions above, which is why CI does both.
 set -e
 
 DISPLAY_NUM="${DISPLAY_NUM:-99}"

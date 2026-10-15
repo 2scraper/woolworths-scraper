@@ -36,11 +36,10 @@ Every column here is measured, and the measurement is why it is here
 --------------------------------------------------------------------
 Taken on a 660-row corpus (589 distinct stockcodes) drawn 2026-09-16 from
 five search terms and three category nodes. The numbers are a snapshot of one
-run rather than a property of the site, which is why they name their date
-(CLAUDE.md §13).
+run rather than a property of the site, which is why they name their date.
 
 Five columns the previous generation of this repo advertised are NOT here,
-and each absence is a measurement rather than an oversight (§9: a column null
+and each absence is a measurement rather than an oversight (a column null
 on every row of every run should not exist, and removing it needs the number
 written down so someone can put it back with a better one):
 
@@ -79,7 +78,7 @@ from typing import Optional, List, Set, Sequence, Any, Type
 # The host a row came from. Woolworths Online is one site on one host, so
 # unlike the sibling repos this genuinely does not vary — but the column
 # stays, in the family's position and under the family's name, so a consumer
-# reading six of these repos reads the same first five columns (§9).
+# reading six of these repos reads the same first five columns.
 SOURCE_DEFAULT = "woolworths.com.au"
 
 # Woolworths Online prices in Australian dollars, and the API NEVER SAYS SO:
@@ -87,7 +86,7 @@ SOURCE_DEFAULT = "woolworths.com.au"
 # in a product object (counted across 50 full objects, 0 occurrences of each).
 #
 # So this is not read from the payload and it is not guessed from a `$` in
-# the DOM either — §4's ladder rates a bare symbol a guess, and it would be
+# the DOM either — the ladder rates a bare symbol a guess, and it would be
 # one, since `$` alone is equally USD, NZD or SGD. It is derived from the
 # HOST: woolworths.com.au is the Australian supermarket and sells in AUD.
 # That is a fact about which site answered, which is why it lives beside
@@ -144,7 +143,7 @@ class Product:
     #
     # So: null unless `WasPrice > Price`. `discount_pct` is then computed
     # from the two rather than read, and is null rather than 0 where there is
-    # no discount — §4's rule, and `smoke_test.py` asserts no row has an
+    # no discount — the rule, and `smoke_test.py` asserts no row has an
     # `original_price` at or below its `price`.
     original_price: Optional[float] = None
     # `SavingsAmount`. Equalled `WasPrice - Price` on every one of the 660
@@ -154,7 +153,7 @@ class Product:
     # Computed from `original_price` and `price`, never read from a badge.
     # Null when there is no was-price, rather than 0.
     discount_pct: Optional[float] = None
-    # WHICH view built the price on this row (§8: never present a guess as a
+    # WHICH view built the price on this row (never present a guess as a
     # fact). `diff_runs.py` reports a price difference that comes with a
     # `price_source` difference as `source_changed` rather than as a change.
     #
@@ -256,7 +255,7 @@ class Product:
     # The fetch this row came from, and its position within it. Unique as a
     # PAIR across a run — `position` restarts at 1 on every page, so the
     # column is worthless without `page` beside it, and `smoke_test.py`
-    # asserts the pair is unique (§18).
+    # asserts the pair is unique.
     #
     # Note that `sku` is NOT unique across a multi-page run before deduping,
     # and that is the ads above rather than a bug.
@@ -271,7 +270,7 @@ class Store:
     """One Woolworths store, from the site's own store locator.
 
     A SECOND row class rather than columns on `Product`, which the family
-    allows for a repo that genuinely reads more than one kind of thing (§9)
+    allows for a repo that genuinely reads more than one kind of thing
     — and it comes with that rule's conditions: the family prefix below is
     byte-identical to `Product`'s and in the same order, `sku` is the id
     the way it is in every schema here, the sidecar records the `mode`
@@ -288,7 +287,7 @@ class Store:
     FOUR FIELDS THE LOCATOR RETURNS ARE NOT HERE. `AddressLine2`,
     `PartnerUrl`, `CategorisedFacilities` and `NearbyPartners` were null on
     50 of 50 store records across three captures (a postcode query, a
-    suburb query and a 30-store coordinate query) on 2026-10-08. §9: a
+    suburb query and a 30-store coordinate query) on 2026-10-08. a
     column that is null on every row of every run costs more than a missing
     one. The measurement is written down so the next person can add one
     back with a better one.
@@ -347,7 +346,7 @@ def dedupe_by_key(rows: Sequence[Any], seen: Set[str], key: str = "sku") -> List
     than its siblings do: a scroll batch re-parses the WHOLE feed, cards
     already read included, so every batch after the first arrives mostly
     duplicate by design. A batch that drops all of its rows is the signal
-    that the feed is exhausted, which is §7's data-based terminating
+    that the feed is exhausted, which is the data-based terminating
     condition and the only one available here.
 
     A row with no key is always kept: there is nothing to check a duplicate
@@ -435,7 +434,7 @@ def _atomic(path: str, newline: Optional[str] = None):
         # hackernews-scraper, which fixed this first — the first version
         # written here used a flat `0o644 & ~umask`, which quietly narrows
         # 0664 to 0644 under umask 002 and clobbers a deliberately tightened
-        # file (§16: lift the sibling's fix, do not invent a second one).
+        # file (lift the sibling's fix, do not invent a second one).
         try:
             mode = os.stat(path).st_mode & 0o777
         except OSError:
@@ -551,14 +550,14 @@ EXIT_NO_PRODUCTS = 4
 # And emptiness on this site is decided by the PAYLOAD'S OWN COUNT, never by
 # the site's "we couldn't find any" copy: that sentence is on every page,
 # including a search returning 2,205 results, and taking it as a marker made
-# a full listing report itself empty (`product_parser`, and §18 — count a
+# a full listing report itself empty (`product_parser`: count a
 # marker on a page you know is good before trusting it).
 #
 # What EXIT_BLOCKED means here is Akamai's EDGE DENIAL: HTTP 403 and roughly
 # 400 bytes of plain HTML — a title, an `<h1>`, one sentence and a reference
 # number — with no widget, no vendor script and nothing for a solver to
 # answer. The status is the primary signal and the absence of the site's own
-# asset host is the structural secondary one (§8).
+# asset host is the structural secondary one.
 EXIT_BLOCKED = 3
 
 # Exit code for a run that gathered SOME rows and then stopped early — a
@@ -638,22 +637,17 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
       partial  — rows were gathered, then the run stopped early
       failed   — nothing was gathered at all
 
-    `mode` and `source` are both recorded, and on this site BOTH of them
-    genuinely vary. `mode`, because a tag row and an archive row populate
-    different columns: reading time and word count come from a payload the
-    tag feed does not carry at all (21 fields per post against the archive's
-    84), so diffing one against the other would report both as having
-    appeared from nowhere. `source`, because a row must say which host
-    domain, and two runs that landed on different hosts describe the same
-    catalogue through different addresses. diff_runs.py refuses a pair whose
-    modes differ.
+    `mode` and `source` are both recorded. `mode`, because a listing run
+    (`search`/`category`) writes `Product` rows and a store lookup writes
+    `Store` rows with different columns, and diff_runs.py refuses a pair
+    whose modes differ. `source`, because a row must say which host served
+    it.
 
-    `extra` carries facts about the run that are not about any single row.
-    This repo puts the scroll trace there, plus `rows_new_per_batch`, and —
-    in archive mode — the DAYS a run covered and any day that redirected.
-    A redirect is the thing worth recording: a tag day with no stories does
-    not 404, it redirects up to the month view, which is a different
-    renderer holding a different set of stories (FINDINGS.md §4).
+    `extra` carries facts about the run that are not about any single row:
+    the listing and store the prices belong to, the site's stated total,
+    how many rows were promoted ads, non-200 API answers, whether the app
+    bounced to /unauthorisederror, the DOM price cross-check counts, pages
+    a concurrent run never reached, and the CSV escape count.
 
     `pages_failed` lists the pages that did not yield data, by number.
     `pages_completed` alone was enough only while pages were fetched strictly
@@ -677,7 +671,7 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
     }
     if extra:
         # Merged rather than nested under a key, so a consumer reads
-        # `shop_rating` at the top level beside `products`. Run fields win a
+        # `stated_total` at the top level beside `products`. Run fields win a
         # name collision: a caller cannot accidentally overwrite `status`.
         meta.update({k: v for k, v in extra.items() if k not in meta})
     return meta
@@ -737,10 +731,10 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # is nothing to put one in. What it has instead is better: a page is an
 # INTEGER in a request body, so page N is addressable without reading page
 # N-1, and `--concurrency` is meaningful here where it is not in every
-# sibling repo (§7).
+# sibling repo.
 #
 # That makes the terminating condition data rather than markup by
-# construction, which is what §7 asks for. The difficulty is the shape that
+# construction, which is what a family note asks for. The difficulty is the shape that
 # data takes — see below.
 #
 # "pagination_exhausted" is the data-side termination condition here, and on
@@ -757,14 +751,14 @@ def save(rows: Sequence[Any], out_prefix: str, fmt: str,
 # run that asked for 8 pages of a 2-page listing and stopped at 2 read the
 # whole listing. Reporting it `partial` (exit 6) would make every correct
 # run of a small category look like a failure, and would put the canary
-# permanently red — which teaches everyone to ignore the canary (§11).
+# permanently red — which teaches everyone to ignore the canary.
 #
 # What must NOT reach here is a listing that stopped because the API was
 # REFUSED. The document answers 200 while `/apis/ui/...` behind it is
 # throttled, so the two are the same observation from the outside; the
 # engines keep them apart by recording the refusal count and reporting
 # `api_error` instead, because a throttled run reported as an exhausted
-# listing is how a run holding page 1 says "complete" (§7).
+# listing is how a run holding page 1 says "complete".
 #
 # "no_new_products" is kept for the family's shape, so a consumer that
 # branches on a sibling repo's stop reason keeps working.
@@ -828,7 +822,7 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     if not rows:
         # Nothing gathered at all, and WHY decides the code. The three
         # outcomes are genuinely different things and a pipeline branches on
-        # them (§8: blocked is not empty is not partial):
+        # them (blocked is not empty is not partial):
         #
         #   blocked          something stood between the run and the content
         #   did not complete we never reached the site — a dead proxy, a

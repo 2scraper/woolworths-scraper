@@ -37,12 +37,12 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.tx
 # An image that ran headless here would build, start, print --help happily,
 # and then return exit 3 on every real invocation — which is precisely the
 # "reports success while doing less than it says" shape this family keeps
-# finding (§16), arriving by way of a default nobody re-measured.
+# finding, arriving by way of a default nobody re-measured.
 # `xauth` alongside `xvfb`, and it is not optional either: `xvfb-run` shells
 # out to xauth to create the display's authority file and dies with
 # "xauth command not found" without it — on EVERY invocation, `--help`
 # included. Found by running the image rather than by building it, which is
-# the whole reason CI does both (CLAUDE.md §11).
+# the whole reason CI does both.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends xvfb xauth x11-utils \
     && rm -rf /var/lib/apt/lists/*

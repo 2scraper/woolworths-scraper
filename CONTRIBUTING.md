@@ -210,8 +210,8 @@ will fail rather than silently regress:
   contract, not decoration: `0` ok, `1` crash, `2` bad usage, `3` blocked,
   `4` zero rows, `5` remote API error, `6` partial. A listing that genuinely
   ran out is `complete`; a listing whose next page the API REFUSED is
-  `partial`, because a throttled run reporting "complete" is the failure §7
-  exists to prevent.
+  `partial`, because a throttled run reporting "complete" is the failure this
+  distinction exists to prevent.
 
 ### Style
 

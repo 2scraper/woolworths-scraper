@@ -278,7 +278,11 @@ def _check_comparable(args) -> bool:
         mode = (meta or {}).get("mode")
         if mode:
             modes[label] = mode
-        if mode and mode not in UNIQUE_BY_SKU_MODES:
+        if mode == "stores":
+            problems.append(
+                f"{label} ({path}) is a store lookup. This tool compares "
+                f"product prices, which a store row does not carry.")
+        elif mode and mode not in UNIQUE_BY_SKU_MODES:
             # This tool's whole premise is one row per `sku`, diffed on
             # price. A mode that produces many rows per sku would give a diff
             # whose every line is an artefact of two rows sharing an id, so
@@ -414,6 +418,19 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as e:
         print(f"[!] Could not read one of the input files: {e}")
         return 2
+
+    # The tracked fields are PRODUCT price columns. A file whose rows carry
+    # none of them (a `--mode stores` lookup) would be compared on nothing
+    # and reported as "0 changed" however much its stores moved — so it is
+    # refused, even with --force, rather than answered.
+    for label, rows in (("--old", old), ("--new", new)):
+        if rows and not any(f in row for row in rows for f in TRACKED_FIELDS):
+            print(f"[!] {label} holds rows with none of the tracked fields "
+                  f"({', '.join(TRACKED_FIELDS)}). This tool compares "
+                  f"product prices; a store lookup (--mode stores) is not "
+                  f"something it can diff, and it would report 0 changes "
+                  f"for any two of them.")
+            return 2
 
     result = diff_products(old, new, price_tolerance_pct=args.price_tolerance_pct)
     _print_summary(result)

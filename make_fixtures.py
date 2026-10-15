@@ -2,7 +2,7 @@
 """make_fixtures.py — cut `fixtures_generated.json` from real captures.
 
 The offline suite's fixtures come from REAL responses rather than from hand-
-written JSON (CLAUDE.md §10). This script is how they are produced, so the
+written JSON. This script is how they are produced, so the
 next person can reproduce them instead of trusting a blob.
 
     python3 make_fixtures.py --captures ./captures --out fixtures_generated.json
@@ -25,8 +25,7 @@ What goes in, and why each one earns its place:
     denial_dom        Akamai's refusal as a BROWSER serialises it.
     denial_raw        the same refusal as raw bytes, where the punctuation is
                       entity-escaped. Both, because a marker that survives
-                      only one of them silently misses an entire engine
-                      (§20).
+                      only one of them silently misses an entire engine.
     served_cdp_page   the same kind of page fetched over --cdp-endpoint,
                       and the reason it is a SEPARATE fixture: the Scraping
                       Browser's auto-solve extension injects its own hunters
@@ -35,7 +34,7 @@ What goes in, and why each one earns its place:
                       `recaptcha` 2 while the locally-fetched page carries 0
                       of each. A captcha guard tested only against the local
                       page never meets an injection and passes without
-                      proving anything (§21).
+                      proving anything.
     tiles_carousel_first
                       the rendered tiles of /shop/browse/bakery read twice in
                       one headful session on 2026-10-15: once when only a
@@ -157,7 +156,7 @@ def verify_equivalence(captures: pathlib.Path, fixtures: dict) -> list:
     """Every product kept in a fixture must parse to the SAME row as it does
     in the untrimmed original.
 
-    CLAUDE.md §15 step 3 asks for exactly this before a trimmed fixture is
+    A family note asks for exactly this before a trimmed fixture is
     committed, and it is easy to skip because the trimmed file looks fine on
     its own. What it catches is a `_scrub` that drops a field the parser
     reads: the fixture would still parse, still produce rows, and quietly
@@ -282,8 +281,8 @@ def build(captures: pathlib.Path) -> dict:
     return fixtures
 
 
-# Session material that must not be committed, even anonymous and expired
-# (§10). `SessionId` identifies the browsing session the capture was taken
+# Session material that must not be committed, even anonymous and expired.
+# `SessionId` identifies the browsing session the capture was taken
 # in; nothing in the suite reads its VALUE, only that the field is there
 # and that `FulfilmentStoreId` sits beside it. `smoke_test.py` guards the
 # SHAPE rather than this literal, so the next capture is caught too.
@@ -352,7 +351,7 @@ def main() -> int:
     fixtures = build(args.captures)
 
     # Verified BEFORE the file is written, so a fixture that disagrees with
-    # its own source never reaches the repo (§15 step 3).
+    # its own source never reaches the repo.
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     problems = verify_equivalence(args.captures, fixtures)
     if problems:
