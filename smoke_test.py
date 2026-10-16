@@ -1551,12 +1551,8 @@ def test_the_canary_is_not_gated_on_a_credential():
     for step in ("Run the canary", "Assert what the run actually produced"):
         assert f"name: {step}" in wf, f"the canary lost its {step!r} step"
     # A proxy secret, where one IS set, must still reach the run — and still
-    # through the environment rather than a command line. It is a paid route,
-    # so it reaches the run on the weekly (Monday) schedule and on a manual
-    # dispatch only; the daily run reads it empty and runs without it.
-    assert ("WOOLWORTHS_PROXY: ${{ (github.event_name != 'schedule' || "
-            "github.event.schedule == '17 19 * * 1') && "
-            "secrets.WOOLWORTHS_PROXY || '' }}") in wf, (
+    # through the environment rather than a command line.
+    assert "WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}" in wf, (
         "a proxy secret would no longer be used even if set")
     assert "--proxy " not in wf, "a credential must not reach a command line"
 
