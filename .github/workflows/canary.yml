@@ -1,9 +1,9 @@
 name: canary
 
-# One real run a day against woolworths.com.au, and the only workflow in this
+# One real run a week (Mondays) against woolworths.com.au, and the only workflow in this
 # repo that touches the site. Everything else is offline (see tests.yml).
 #
-# THIS CANARY RUNS LIVE, EVERY DAY, WITH NO CREDENTIAL — on purpose.
+# THIS CANARY RUNS LIVE, EVERY MONDAY, WITH NO CREDENTIAL — on purpose.
 #
 # It used to skip unless a `WOOLWORTHS_PROXY` secret was set, on the reasoning
 # that "Akamai refuses this site to a datacentre address, and a GitHub runner
@@ -20,9 +20,9 @@ name: canary
 #
 # A canary that CAN pass without a credential must never
 # be gated on one. The README's central promise is that this site needs no
-# key, no proxy and no account, and an ungated daily run is that sentence
-# under test every morning. If Woolworths starts refusing runners, this goes
-# red the next day and the promise is retested without anyone remembering to.
+# key, no proxy and no account, and an ungated weekly run is that sentence
+# under test every Monday. If Woolworths starts refusing runners, this goes
+# red on the next weekly run and the promise is retested without anyone remembering to.
 #
 # A `WOOLWORTHS_PROXY` secret is still USED if one is set — it goes through
 # the ENVIRONMENT rather than a `--proxy` line, because `env_config.py`
@@ -32,11 +32,7 @@ name: canary
 
 on:
   schedule:
-    - cron: "17 19 * * *"       # 05:17 Australian eastern time, off-peak
-    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
-    # captcha key). On the daily run above those secrets read as empty, so
-    # it takes the free no-secret route and bills nothing.
-    - cron: "17 19 * * 1"
+    - cron: "17 19 * * 1"       # Mondays 19:17 UTC (Tuesday 05:17 Australian eastern standard time), off-peak
   workflow_dispatch:
 
 permissions:
@@ -72,7 +68,7 @@ jobs:
       - name: Run the canary
         id: run
         env:
-          WOOLWORTHS_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '17 19 * * 1') && secrets.WOOLWORTHS_PROXY || '' }}
+          WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}
         run: |
           # set +e: GitHub runs `run:` under `bash -e`, so a non-zero exit
           # would abort the step BEFORE the exit code could be captured, and

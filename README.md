@@ -61,7 +61,7 @@ addresses have now been measured being served headful — a German VPS on
 2026-09-16 and a GitHub-hosted runner in Azure `westus3` on 2026-10-08, the
 latter returning 109 rows with `status: complete` and no credential of any
 kind. So "Akamai refuses datacentres" is NOT what this site does; it refuses
-headless clients, and the daily canary runs ungated from a runner to keep
+headless clients, and the weekly (Monday) canary runs ungated from a runner to keep
 that claim under test.
 
 If your address is refused anyway: `--proxy`, `--proxy-file`, or
