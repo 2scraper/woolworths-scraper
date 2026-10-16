@@ -11,6 +11,8 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-10-16
+
 > **Behaviour change.** `--allow-empty` now writes an empty file only for a
 > genuine empty result, and its sidecar says `status: empty` (was
 > `failed`). A blocked or failed run with `--allow-empty` no longer
@@ -677,7 +679,8 @@ do. `captcha_solver.py` implements reCAPTCHA v2/v3, enterprise reCAPTCHA
 (`TurnstileTaskProxyless`); if Woolworths ever renders one,
 `page_flow.STATE_POLICY` is the single line to change.
 
-[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/2scraper/woolworths-scraper/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/2scraper/woolworths-scraper/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/2scraper/woolworths-scraper/compare/v0.4.0...v0.5.0
 [0.1.1]: https://github.com/2scraper/woolworths-scraper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/2scraper/woolworths-scraper/releases/tag/v0.1.0
