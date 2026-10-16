@@ -11,6 +11,12 @@ rather than leaving anyone to discover it from their own output.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: the canary's optional paid secret `WOOLWORTHS_PROXY` now reaches it only on a new weekly
+  run (Mondays 19:17 UTC) and on a manual dispatch. The daily run keeps its
+  schedule and takes the free route without them, so it bills nothing.
+
 ## [0.5.1] — 2026-10-16
 
 > **Behaviour change.** `--allow-empty` now writes an empty file only for a
