@@ -33,6 +33,10 @@ name: canary
 on:
   schedule:
     - cron: "17 19 * * *"       # 05:17 Australian eastern time, off-peak
+    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
+    # captcha key). On the daily run above those secrets read as empty, so
+    # it takes the free no-secret route and bills nothing.
+    - cron: "17 19 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -68,7 +72,7 @@ jobs:
       - name: Run the canary
         id: run
         env:
-          WOOLWORTHS_PROXY: ${{ secrets.WOOLWORTHS_PROXY }}
+          WOOLWORTHS_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '17 19 * * 1') && secrets.WOOLWORTHS_PROXY || '' }}
         run: |
           # set +e: GitHub runs `run:` under `bash -e`, so a non-zero exit
           # would abort the step BEFORE the exit code could be captured, and
