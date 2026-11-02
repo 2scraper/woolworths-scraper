@@ -1,4 +1,4 @@
-# woolworths-scraper
+# Woolworths Scraper — Prices, Specials and Health Star Ratings in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/woolworths-scraper?sort=semver)](https://github.com/2scraper/woolworths-scraper/releases)
 [![tests](https://github.com/2scraper/woolworths-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/woolworths-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20pyppeteer-lightgrey)](#engines)
 [![runs without an account](https://img.shields.io/badge/runs%20without-an%20account-brightgreen)](#what-you-need-before-this-works)
+
+**Woolworths scraper** — an open-source (MIT) Python tool that reads woolworths.com.au search results and category pages and writes prices, unit prices, specials, health star ratings and allergen data to JSON or CSV. From a residential address it needs no account, key or proxy; from a datacentre it needs a visible (headful) browser, which is the default: measured 2026-09-16, headful was served 4 of 4 and headless refused 4 of 4. Use it for a supermarket price dataset or price monitoring, comparing two runs with `diff_runs.py`.
 
 Scrapes product listings from **[woolworths.com.au](https://www.woolworths.com.au)**,
 Australia's largest supermarket — search results and category browse, with
@@ -443,3 +445,20 @@ responsibility to read; so is the rate you run at.
 
 MIT licensed. Part of the [2scraper](https://github.com/2scraper) family,
 which shares a row schema, exit codes and output contract across sites.
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Amazon scraper](https://github.com/2scraper/amazon-scraper) — Search results, best-seller grids, product pages and reviews…
+- [Andie Swim scraper](https://github.com/2scraper/andieswim-scraper) — Collections, keyword lookups and per-size stock…
+- [Bershka scraper](https://github.com/2scraper/bershka-scraper) — Every SKU in a Bershka category
+- [Catawiki scraper](https://github.com/2scraper/catawiki-scraper) — Auction lots, bids, reserves, estimates and sellers…
+- [Etsy scraper](https://github.com/2scraper/etsy-scraper) — Search, category, shop and listing pages as JSON or CSV…
+- [Farfetch scraper](https://github.com/2scraper/farfetch-scraper) — Luxury fashion listings and per-size product data…
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
