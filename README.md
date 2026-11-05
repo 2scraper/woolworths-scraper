@@ -430,9 +430,22 @@ skips; CI installs each engine in its own virtualenv and fails if the
 matching group skips. Fixtures are cut from real captures by
 `make_fixtures.py` and scrubbed of advertising tokens.
 
-The canary runs one real 3-page run a day, but **skips with a notice unless a
-`WOOLWORTHS_PROXY` secret is set** — Akamai refuses GitHub's runners, and a
-check that is always red teaches everyone to ignore checks.
+The canary (`.github/workflows/canary.yml`) is the only workflow that touches
+the site. It runs once a week, on Mondays at 19:17 UTC, and on a manual
+dispatch. It is **not gated on a credential**: it runs headful Playwright under
+Xvfb straight from a GitHub-hosted runner, the same way a runner was served on
+2026-10-08. A `WOOLWORTHS_PROXY` secret, if one is set, is passed through the
+environment and used; without it the run goes direct.
+
+Each run fetches three pages of a filtered category (bakery) and fails on any
+non-zero exit. A refusal is therefore reported, not skipped: exit 3 turns the
+canary red, as do exit 4, 5 and 6. A run that exits 0 must also pass assertions
+on what it wrote: `status: complete`, at least three pages and no failed page,
+at least 90 rows, a title, URL and SKU on every row, a price on at least 90% of
+rows, unique page and position pairs, no was-price at or below the price,
+labelled sponsored rows, and a DOM cross-check in which at least 90% of the
+checked tiles agree with the API price and no `/unauthorisederror` redirect.
+The output, sidecar and log are kept as run artefacts for 14 days.
 
 ---
 

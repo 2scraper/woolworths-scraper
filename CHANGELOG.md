@@ -14,6 +14,7 @@ rather than leaving anyone to discover it from their own output.
 ### Changed
 
 - CI only: the canary now runs weekly (Mondays 19:17 UTC) and on a manual dispatch, with its optional secret `WOOLWORTHS_PROXY` passed on every run; the daily schedule is removed.
+- Docs: the README's canary paragraph now describes the workflow as it runs — weekly and on dispatch, ungated, headful under Xvfb, red on a refusal — instead of a daily run that skipped without a proxy secret.
 
 ## [0.5.1] — 2026-10-16
 
